@@ -1,0 +1,91 @@
+name: Rust CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "gristmill-core/**"
+      - ".github/workflows/rust.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "gristmill-core/**"
+      - ".github/workflows/rust.yml"
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  fmt:
+    name: Formatting
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: cargo fmt --check
+        working-directory: gristmill-core
+        run: cargo fmt --all -- --check
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: gristmill-core
+      - name: cargo clippy
+        working-directory: gristmill-core
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+  test:
+    name: Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: gristmill-core
+      - name: cargo test
+        working-directory: gristmill-core
+        run: cargo test --all-features
+
+  latency:
+    name: Sieve Latency Regression (p99 < 5 ms)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: gristmill-core
+      - name: Build release (needed for accurate p99)
+        working-directory: gristmill-core
+        run: cargo build --release -p grist-sieve
+      - name: Run latency regression
+        working-directory: gristmill-core
+        run: cargo test -p grist-sieve --release -- --include-ignored latency
+
+  build:
+    name: Build daemon
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: gristmill-core
+      - name: cargo build --release
+        working-directory: gristmill-core
+        run: cargo build --release -p gristmill-daemon

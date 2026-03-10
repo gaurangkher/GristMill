@@ -1,0 +1,221 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write   # create GitHub Release + upload assets
+  packages: write   # push to ghcr.io
+
+jobs:
+  # ── Validate tag format ───────────────────────────────────────────────────
+  validate:
+    name: Validate tag
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - name: Parse version from tag
+        id: ver
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Building release v$VERSION"
+
+  # ── Rust: build static binaries ───────────────────────────────────────────
+  build-rust:
+    name: Build daemon (${{ matrix.target }})
+    needs: validate
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-latest
+            asset_name: gristmill-daemon-linux-x86_64
+          - target: aarch64-unknown-linux-musl
+            runner: ubuntu-latest
+            asset_name: gristmill-daemon-linux-arm64
+          - target: x86_64-apple-darwin
+            runner: macos-13
+            asset_name: gristmill-daemon-macos-x86_64
+          - target: aarch64-apple-darwin
+            runner: macos-latest
+            asset_name: gristmill-daemon-macos-arm64
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: gristmill-core
+          key: ${{ matrix.target }}
+
+      - name: Install musl-tools (Linux only)
+        if: contains(matrix.target, 'linux')
+        run: sudo apt-get install -y musl-tools
+
+      - name: Build
+        working-directory: gristmill-core
+        run: cargo build --release --target ${{ matrix.target }} -p gristmill-daemon
+
+      - name: Package binary
+        run: |
+          cp gristmill-core/target/${{ matrix.target }}/release/gristmill-daemon \
+             ${{ matrix.asset_name }}
+          tar czf ${{ matrix.asset_name }}.tar.gz ${{ matrix.asset_name }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: ${{ matrix.asset_name }}.tar.gz
+
+  # ── Python: build wheel via maturin ──────────────────────────────────────
+  build-python-wheel:
+    name: Python wheel (${{ matrix.target }})
+    needs: validate
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - target: x86_64
+            runner: ubuntu-latest
+          - target: aarch64
+            runner: ubuntu-latest
+          - target: x86_64
+            runner: macos-13
+          - target: aarch64
+            runner: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build wheels with maturin
+        uses: PyO3/maturin-action@v1
+        with:
+          working-directory: gristmill-core/crates/grist-ffi
+          args: --release --features python --out dist
+          target: ${{ matrix.target }}
+          manylinux: auto
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-wheel-${{ matrix.runner }}-${{ matrix.target }}
+          path: gristmill-core/crates/grist-ffi/dist/*.whl
+
+  # ── Python: publish gristmill-ml to PyPI ─────────────────────────────────
+  publish-pypi-ml:
+    name: Publish gristmill-ml → PyPI
+    needs: [build-python-wheel]
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write  # OIDC trusted publishing
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build gristmill-ml sdist + wheel
+        working-directory: gristmill-ml
+        run: |
+          pip install build
+          python -m build
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: gristmill-ml/dist/
+
+  # ── TypeScript: build and publish to npm ─────────────────────────────────
+  publish-npm:
+    name: Publish gristmill-integrations → npm
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: npm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+          cache: pnpm
+          cache-dependency-path: gristmill-integrations/pnpm-lock.yaml
+      - name: Install + build
+        working-directory: gristmill-integrations
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+      - name: Set version from tag
+        working-directory: gristmill-integrations
+        run: npm version ${{ needs.validate.outputs.version }} --no-git-tag-version
+      - name: Publish
+        working-directory: gristmill-integrations
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: pnpm publish --access public --no-git-checks
+
+  # ── Rust: publish crates to crates.io ────────────────────────────────────
+  publish-crates:
+    name: Publish Rust crates → crates.io
+    needs: [build-rust]
+    runs-on: ubuntu-latest
+    environment: crates-io
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: gristmill-core
+      - name: Publish crates in dependency order
+        working-directory: gristmill-core
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          # Publish in topological order (leaf crates first)
+          for crate in grist-event grist-bus grist-config grist-grinders grist-sieve \
+                       grist-ledger grist-hammer grist-millwright grist-core grist-ffi; do
+            echo "Publishing $crate..."
+            cargo publish -p "$crate" --no-verify || true
+            # Wait for crates.io to index before publishing dependents
+            sleep 20
+          done
+
+  # ── Create GitHub Release ─────────────────────────────────────────────────
+  create-release:
+    name: Create GitHub Release
+    needs: [build-rust, build-python-wheel, publish-npm]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Extract release notes from CHANGELOG.md
+        id: changelog
+        run: |
+          VERSION=${{ needs.validate.outputs.version }}
+          NOTES=$(awk "/^## \[$VERSION\]/{flag=1; next} /^## \[/{flag=0} flag" CHANGELOG.md)
+          echo "notes<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$NOTES" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: GristMill v${{ needs.validate.outputs.version }}
+          body: ${{ steps.changelog.outputs.notes }}
+          draft: false
+          prerelease: ${{ contains(github.ref, '-rc') || contains(github.ref, '-beta') || contains(github.ref, '-alpha') }}
+          files: artifacts/**/*.tar.gz

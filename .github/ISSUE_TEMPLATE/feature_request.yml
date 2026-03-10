@@ -1,0 +1,59 @@
+name: Feature Request
+description: Suggest a new capability
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: Describe the use case first — not the implementation.
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - Rust core (gristmill-core)
+        - Python ML (gristmill-ml)
+        - TypeScript shell (gristmill-integrations)
+        - New hopper adapter
+        - New notification channel
+        - Plugin system
+        - Dashboard / API
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the use case. Who needs this, and why?
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: How would you like it to work? API sketches, config snippets, and diagrams are welcome.
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What other approaches did you consider?
+
+  - type: checkboxes
+    id: invariants
+    attributes:
+      label: Domain invariants
+      description: Please confirm your feature respects GristMill's design boundaries.
+      options:
+        - label: Inference logic stays in Rust — not in TypeScript or Python
+          required: true
+        - label: Python is used for training only — not production inference
+          required: true
+        - label: TypeScript handles I/O only — delegates all logic to Rust via bridge
+          required: true
+        - label: The Sieve hot path must remain <5 ms p99
+          required: true

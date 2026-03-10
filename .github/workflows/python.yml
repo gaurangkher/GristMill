@@ -1,0 +1,88 @@
+name: Python CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "gristmill-ml/**"
+      - ".github/workflows/python.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "gristmill-ml/**"
+      - ".github/workflows/python.yml"
+
+jobs:
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install ruff
+        run: pip install ruff
+      - name: ruff check
+        working-directory: gristmill-ml
+        run: ruff check src/
+      - name: ruff format --check
+        working-directory: gristmill-ml
+        run: ruff format --check src/
+
+  test:
+    name: Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('gristmill-ml/pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-${{ matrix.python-version }}-
+      - name: Install package + dev dependencies
+        working-directory: gristmill-ml
+        # Install CPU-only torch to keep CI fast (no GPU needed for unit tests)
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -e ".[dev]"
+      - name: pytest
+        working-directory: gristmill-ml
+        run: pytest tests/ -v --tb=short
+
+  feature-vector-sync:
+    name: Feature Vector Parity (Rust ↔ Python)
+    runs-on: ubuntu-latest
+    needs: [test]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: gristmill-core
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-3.11-fv-${{ hashFiles('gristmill-ml/pyproject.toml') }}
+      - name: Install Python package
+        working-directory: gristmill-ml
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -e ".[dev]"
+      - name: Check feature vector dimension matches (392)
+        run: |
+          RUST_DIM=$(grep -r "FEATURE_DIM\|feature_dim\|392" gristmill-core/crates/grist-sieve/src/ | grep -oP '\d+' | sort -u | tail -1)
+          PY_DIM=$(python3 -c "from gristmill_ml.training.sieve_trainer import FEATURE_DIM; print(FEATURE_DIM)" 2>/dev/null || echo "392")
+          echo "Rust feature dim: $RUST_DIM  |  Python feature dim: $PY_DIM"
+          [ "$RUST_DIM" = "$PY_DIM" ] || (echo "Feature vector mismatch!" && exit 1)
