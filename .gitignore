@@ -1,0 +1,52 @@
+# Rust
+target/
+*.pdb
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+*.whl
+*.whl.metadata
+.pytest_cache/
+.mypy_cache/
+mlruns/
+wandb/
+
+# TypeScript / Node
+node_modules/
+dist/
+*.js.map
+.pnpm-store/
+
+# Models (large binary files)
+*.onnx
+*.gguf
+*.tflite
+*.bin
+*.pt
+*.pth
+*.safetensors
+
+# Config / secrets
+.env
+.env.*
+!.env.example
+~/.gristmill/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# GristMill runtime
+*.sock

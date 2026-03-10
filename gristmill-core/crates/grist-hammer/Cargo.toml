@@ -1,0 +1,46 @@
+[package]
+name        = "grist-hammer"
+description = "LLM escalation gateway for GristMill — semantic cache, budget enforcement, Anthropic+Ollama routing"
+version.workspace   = true
+edition.workspace   = true
+authors.workspace   = true
+license.workspace   = true
+
+[dependencies]
+grist-event  = { path = "../grist-event" }
+
+# async
+tokio        = { workspace = true }
+
+# HTTP (direct JSON — no SDK)
+reqwest      = { workspace = true }
+
+# hashing for cache keys
+sha2         = { workspace = true }
+hex          = { workspace = true }
+
+# cosine similarity
+ndarray      = { workspace = true }
+
+# serialization
+serde        = { workspace = true }
+serde_json   = { workspace = true }
+
+# concurrency
+parking_lot  = { workspace = true }
+lru          = { workspace = true }
+
+# utilities
+thiserror    = { workspace = true }
+anyhow       = { workspace = true }
+tracing      = { workspace = true }
+metrics      = { workspace = true }
+ulid         = { workspace = true }
+chrono       = { workspace = true }
+
+[dev-dependencies]
+tokio              = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[lib]
+name = "grist_hammer"

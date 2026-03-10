@@ -1,0 +1,55 @@
+{
+  "run_id": "01KJ49S0PSDBZVAYKKP4GYP4F6",
+  "pipeline_id": "diamond",
+  "started_at_ms": 1771818484441,
+  "completed_steps": {
+    "c": {
+      "step_id": "c",
+      "outcome": "succeeded",
+      "output": {
+        "matched": true,
+        "rule_id": "r2",
+        "step_id": "c"
+      },
+      "attempts": 1,
+      "elapsed_ms": 0
+    },
+    "a": {
+      "step_id": "a",
+      "outcome": "succeeded",
+      "output": {
+        "confidence": 0.9200000166893005,
+        "model_id": "m",
+        "result": "simple",
+        "step_id": "a"
+      },
+      "attempts": 1,
+      "elapsed_ms": 0
+    },
+    "b": {
+      "step_id": "b",
+      "outcome": "succeeded",
+      "output": {
+        "matched": true,
+        "rule_id": "r1",
+        "step_id": "b"
+      },
+      "attempts": 1,
+      "elapsed_ms": 0
+    },
+    "d": {
+      "step_id": "d",
+      "outcome": "succeeded",
+      "output": {
+        "max_tokens": 64,
+        "prompt_template": "summarise",
+        "response": "[llm response stub]",
+        "step_id": "d",
+        "tokens_used": 42
+      },
+      "attempts": 1,
+      "elapsed_ms": 0
+    }
+  },
+  "status": "completed"
+}

@@ -1,0 +1,20 @@
+{
+  "run_id": "01KJ4AQKS7BMD9WY8H2GS49BZH",
+  "pipeline_id": "test-pipe",
+  "started_at_ms": 1771819487015,
+  "completed_steps": {
+    "a": {
+      "step_id": "a",
+      "outcome": "succeeded",
+      "output": {
+        "confidence": 0.9200000166893005,
+        "model_id": "m",
+        "result": "simple",
+        "step_id": "a"
+      },
+      "attempts": 1,
+      "elapsed_ms": 0
+    }
+  },
+  "status": "completed"
+}

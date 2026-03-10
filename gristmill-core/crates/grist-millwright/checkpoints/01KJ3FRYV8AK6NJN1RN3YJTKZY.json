@@ -1,0 +1,20 @@
+{
+  "run_id": "01KJ3FRYV8AK6NJN1RN3YJTKZY",
+  "pipeline_id": "direct",
+  "started_at_ms": 1771791219560,
+  "completed_steps": {
+    "s": {
+      "step_id": "s",
+      "outcome": "succeeded",
+      "output": {
+        "confidence": 0.9200000166893005,
+        "model_id": "m",
+        "result": "simple",
+        "step_id": "s"
+      },
+      "attempts": 1,
+      "elapsed_ms": 0
+    }
+  },
+  "status": "completed"
+}

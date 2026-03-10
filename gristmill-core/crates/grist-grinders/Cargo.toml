@@ -1,0 +1,51 @@
+[package]
+name        = "grist-grinders"
+description = "Local ML inference pool for GristMill — ONNX, GGUF, dynamic batching"
+version.workspace   = true
+edition.workspace   = true
+authors.workspace   = true
+license.workspace   = true
+
+[features]
+# Enable ONNX Runtime inference (requires the ort runtime library).
+# Without this flag a stub that returns an error is used.
+onnx = ["dep:ort"]
+
+# Enable llama.cpp GGUF inference via llama-cpp-2.
+# Without this flag GGUF model types return an error.
+gguf = ["dep:llama_cpp"]
+
+[dependencies]
+grist-event  = { path = "../grist-event" }
+grist-sieve  = { path = "../grist-sieve" }
+
+# async
+tokio        = { workspace = true }
+
+# CPU parallel inference
+rayon        = { workspace = true }
+
+# ML inference — ONNX (optional)
+ort          = { workspace = true, optional = true }
+ndarray      = { workspace = true }
+
+# GGUF inference via llama.cpp (optional)
+llama_cpp    = { version = "0.3", optional = true }
+
+# serialization
+serde        = { workspace = true }
+serde_json   = { workspace = true }
+
+# utilities
+thiserror    = { workspace = true }
+anyhow       = { workspace = true }
+tracing      = { workspace = true }
+metrics      = { workspace = true }
+parking_lot  = { workspace = true }
+arc-swap     = { workspace = true }
+dashmap      = { workspace = true }
+
+[dev-dependencies]
+tokio              = { workspace = true }
+tracing-subscriber = { workspace = true }
+tempfile           = { workspace = true }

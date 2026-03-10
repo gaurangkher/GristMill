@@ -1,0 +1,28 @@
+{
+  "run_id": "01KJ3GDFR6G2DW1C5980J5G6VV",
+  "pipeline_id": "p",
+  "started_at_ms": 1771791892230,
+  "completed_steps": {
+    "a": {
+      "step_id": "a",
+      "outcome": "succeeded",
+      "output": {
+        "matched": true,
+        "rule_id": "r",
+        "step_id": "a"
+      },
+      "attempts": 1,
+      "elapsed_ms": 0
+    },
+    "g": {
+      "step_id": "g",
+      "outcome": "succeeded",
+      "output": {
+        "gate": "open"
+      },
+      "attempts": 1,
+      "elapsed_ms": 0
+    }
+  },
+  "status": "completed"
+}

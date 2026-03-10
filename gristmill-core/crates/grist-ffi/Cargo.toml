@@ -1,0 +1,59 @@
+[package]
+name        = "grist-ffi"
+description = "PyO3 (Python) and napi-rs (Node.js) FFI bridges for GristMill core"
+version.workspace   = true
+edition.workspace   = true
+authors.workspace   = true
+license.workspace   = true
+
+# ── Thin FFI surface — no business logic here ────────────────────────────────
+# Only the bridge modules are active; heavy logic stays in the underlying
+# grist-* crates.  Both feature gates are opt-in so that `cargo check` in
+# the workspace (without either flag) still compiles cleanly.
+
+[features]
+default = []
+python  = ["pyo3", "pyo3-asyncio"]
+node    = ["napi", "napi-derive"]
+
+[lib]
+# For napi-rs the crate-type must include "cdylib".
+# Python wheels (maturin) also require "cdylib".
+# We keep "rlib" so the crate is still linkable without either feature.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# ── Aggregate core (owns GristMillCore + CoreError) ───────────────────────────
+grist-core       = { path = "../grist-core" }
+
+# ── Individual crates needed by bridge modules for type imports ───────────────
+grist-event      = { path = "../grist-event" }
+grist-millwright = { path = "../grist-millwright" }
+grist-bus        = { path = "../grist-bus" }
+
+# ── Runtime ───────────────────────────────────────────────────────────────────
+tokio       = { workspace = true }
+
+# ── Serialization ─────────────────────────────────────────────────────────────
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+
+# ── Utilities ─────────────────────────────────────────────────────────────────
+tracing     = { workspace = true }
+
+# ── Python (optional) ─────────────────────────────────────────────────────────
+pyo3            = { version = "0.22", features = ["auto-initialize"], optional = true }
+pyo3-asyncio    = { version = "0.21", features = ["tokio-runtime"],   optional = true }
+
+# ── Node.js (optional) ────────────────────────────────────────────────────────
+napi        = { version = "3", features = ["async", "serde-json"], optional = true }
+napi-derive = { version = "3", optional = true }
+
+[build-dependencies]
+# napi-rs requires this to emit the Node.js module registration boilerplate.
+napi-build = "2"
+
+[dev-dependencies]
+tokio           = { workspace = true }
+tempfile        = { workspace = true }
+tracing-subscriber = { workspace = true }

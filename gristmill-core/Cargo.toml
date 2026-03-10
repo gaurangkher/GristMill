@@ -1,0 +1,69 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/grist-event",
+    "crates/grist-sieve",
+    "crates/grist-grinders",
+    "crates/grist-millwright",
+    "crates/grist-ledger",
+    "crates/grist-hammer",
+    "crates/grist-config",
+    "crates/grist-bus",
+    "crates/grist-core",
+    "gristmill-daemon",
+]
+
+[workspace.package]
+version     = "0.1.0"
+edition     = "2021"
+authors     = ["GristMill Architecture Team"]
+license     = "MIT"
+repository  = "https://github.com/gristmill/gristmill"
+
+[workspace.dependencies]
+# ── Async / concurrency ──────────────────────────────────────────────────────
+tokio       = { version = "1", features = ["full"] }
+rayon       = "1.10"
+
+# ── ML inference ─────────────────────────────────────────────────────────────
+# ort v2 is still in RC — pin to the latest release candidate explicitly.
+ort         = { version = "2.0.0-rc.11", features = ["copy-dylibs"] }
+ndarray     = "0.16"
+
+# ── Vector search ────────────────────────────────────────────────────────────
+usearch     = "2.24"
+
+# ── Storage ──────────────────────────────────────────────────────────────────
+rusqlite    = { version = "0.32", features = ["bundled-full"] }
+# sled stable is 0.34; 1.x is still alpha — use the last stable release.
+sled        = "0.34"
+zstd        = "0.13"
+
+# ── Serialization ────────────────────────────────────────────────────────────
+serde       = { version = "1", features = ["derive"] }
+serde_json  = "1"
+rmp-serde   = "1"
+
+# ── IDs ──────────────────────────────────────────────────────────────────────
+ulid        = { version = "1", features = ["serde"] }
+
+# ── Config ───────────────────────────────────────────────────────────────────
+config      = "0.14"
+
+# ── Observability ────────────────────────────────────────────────────────────
+tracing             = "0.1"
+tracing-subscriber  = { version = "0.3", features = ["env-filter"] }
+metrics             = "0.23"
+
+# ── Utilities ────────────────────────────────────────────────────────────────
+dashmap     = "6"
+sha2        = "0.10"
+hex         = "0.4"
+thiserror   = "2"
+anyhow      = "1"
+parking_lot = "0.12"
+arc-swap    = "1"
+lru         = "0.12"
+chrono      = { version = "0.4", features = ["serde"] }
+tempfile    = "3"
+reqwest     = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }

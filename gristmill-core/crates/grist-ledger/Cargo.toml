@@ -1,0 +1,47 @@
+[package]
+name        = "grist-ledger"
+description = "Three-tier memory system for GristMill — hot LRU, warm SQLite+usearch, cold zstd JSONL"
+version.workspace   = true
+edition.workspace   = true
+authors.workspace   = true
+license.workspace   = true
+
+[dependencies]
+grist-event  = { path = "../grist-event" }
+
+# async runtime
+tokio        = { workspace = true }
+
+# storage
+sled         = { workspace = true }
+rusqlite     = { workspace = true }
+usearch      = { workspace = true }
+zstd         = { workspace = true }
+
+# ML / tensor (for embedder + cosine)
+ndarray      = { workspace = true }
+
+# serialization
+serde        = { workspace = true }
+serde_json   = { workspace = true }
+
+# hashing (StubEmbedder)
+sha2         = { workspace = true }
+
+# utilities
+ulid         = { workspace = true }
+chrono       = { workspace = true }
+lru          = { workspace = true }
+parking_lot  = { workspace = true }
+thiserror    = { workspace = true }
+anyhow       = { workspace = true }
+tracing      = { workspace = true }
+metrics      = { workspace = true }
+
+[dev-dependencies]
+tokio              = { workspace = true }
+tracing-subscriber = { workspace = true }
+tempfile           = { workspace = true }
+
+[lib]
+name = "grist_ledger"

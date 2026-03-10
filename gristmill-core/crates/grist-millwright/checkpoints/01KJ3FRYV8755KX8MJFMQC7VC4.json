@@ -1,0 +1,20 @@
+{
+  "run_id": "01KJ3FRYV8755KX8MJFMQC7VC4",
+  "pipeline_id": "diamond",
+  "started_at_ms": 1771791219560,
+  "completed_steps": {
+    "a": {
+      "step_id": "a",
+      "outcome": "succeeded",
+      "output": {
+        "confidence": 0.9200000166893005,
+        "model_id": "m",
+        "result": "simple",
+        "step_id": "a"
+      },
+      "attempts": 1,
+      "elapsed_ms": 0
+    }
+  },
+  "status": "failed"
+}

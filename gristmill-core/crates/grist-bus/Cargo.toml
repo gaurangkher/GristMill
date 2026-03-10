@@ -1,0 +1,17 @@
+[package]
+name        = "grist-bus"
+description = "Internal typed pub/sub event bus for GristMill"
+version.workspace   = true
+edition.workspace   = true
+authors.workspace   = true
+license.workspace   = true
+
+[dependencies]
+grist-event = { path = "../grist-event" }
+tokio       = { workspace = true }
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+tracing     = { workspace = true }
+metrics     = { workspace = true }
+dashmap     = { workspace = true }
+thiserror   = { workspace = true }

@@ -1,0 +1,28 @@
+[package]
+name        = "grist-core"
+description = "GristMill aggregate core — Sieve, Ledger, Hammer, Millwright, Bus"
+version.workspace   = true
+edition.workspace   = true
+authors.workspace   = true
+license.workspace   = true
+
+[dependencies]
+grist-event      = { path = "../grist-event" }
+grist-sieve      = { path = "../grist-sieve" }
+grist-ledger     = { path = "../grist-ledger" }
+grist-hammer     = { path = "../grist-hammer" }
+grist-millwright = { path = "../grist-millwright" }
+grist-bus        = { path = "../grist-bus" }
+grist-config     = { path = "../grist-config" }
+grist-grinders   = { path = "../grist-grinders" }
+
+tokio      = { workspace = true }
+serde      = { workspace = true }
+serde_json = { workspace = true }
+thiserror  = { workspace = true }
+tracing    = { workspace = true }
+
+[dev-dependencies]
+tokio    = { workspace = true }
+tempfile = { workspace = true }
+tracing-subscriber = { workspace = true }

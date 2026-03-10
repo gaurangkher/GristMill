@@ -1,0 +1,45 @@
+[package]
+name        = "grist-sieve"
+description = "Triage classifier for GristMill — routes events in <5ms p99"
+version.workspace   = true
+edition.workspace   = true
+authors.workspace   = true
+license.workspace   = true
+
+[features]
+# Enable ONNX Runtime inference (requires the model file).
+# Without this flag the heuristic classifier is used.
+onnx = ["dep:ort"]
+
+[dependencies]
+grist-event = { path = "../grist-event" }
+
+# async
+tokio       = { workspace = true }
+
+# ML inference (ONNX) — optional; enabled via the "onnx" feature
+ort         = { workspace = true, optional = true }
+ndarray     = { workspace = true }
+
+# serialization
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+
+# utilities
+thiserror   = { workspace = true }
+anyhow      = { workspace = true }
+tracing     = { workspace = true }
+metrics     = { workspace = true }
+sha2        = { workspace = true }
+hex         = { workspace = true }
+ulid        = { workspace = true }
+chrono      = { workspace = true }
+parking_lot = { workspace = true }
+arc-swap    = { workspace = true }
+lru         = { workspace = true }
+dashmap     = { workspace = true }
+
+[dev-dependencies]
+tokio              = { workspace = true }
+tracing-subscriber = { workspace = true }
+tempfile           = { workspace = true }

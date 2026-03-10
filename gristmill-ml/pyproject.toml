@@ -1,0 +1,46 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gristmill-ml"
+version = "0.1.0"
+description = "GristMill ML shell — model training, ONNX export, and closed-loop retraining"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "torch>=2.1",
+    "transformers>=4.40",
+    "sentence-transformers>=2.7",
+    "onnx>=1.16",
+    "onnxruntime>=1.18",
+    "onnxruntime-tools>=1.7",
+    "numpy>=1.24",
+    "mlflow>=2.12",
+    "datasets>=2.18",
+    "scikit-learn>=1.4",
+    "spacy>=3.7",
+    "accelerate>=0.28",
+    "evaluate>=0.4",
+    "seqeval>=1.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=4.0",
+    "ruff>=0.4",
+]
+
+[project.scripts]
+gristmill-train-sieve = "gristmill_ml.training.sieve_trainer:main"
+gristmill-export      = "gristmill_ml.export.onnx_export:main"
+gristmill-validate    = "gristmill_ml.export.validate:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gristmill_ml"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

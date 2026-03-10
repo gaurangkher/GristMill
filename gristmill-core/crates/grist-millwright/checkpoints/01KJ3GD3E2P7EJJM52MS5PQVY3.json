@@ -1,0 +1,19 @@
+{
+  "run_id": "01KJ3GD3E2P7EJJM52MS5PQVY3",
+  "pipeline_id": "p",
+  "started_at_ms": 1771791879618,
+  "completed_steps": {
+    "s": {
+      "step_id": "s",
+      "outcome": "succeeded",
+      "output": {
+        "matched": true,
+        "rule_id": "r",
+        "step_id": "s"
+      },
+      "attempts": 1,
+      "elapsed_ms": 0
+    }
+  },
+  "status": "completed"
+}
