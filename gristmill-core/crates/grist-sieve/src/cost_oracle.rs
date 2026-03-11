@@ -7,10 +7,10 @@
 //! threshold logic to produce the final [`RouteDecision`] — the rich routing
 //! object that the Millwright actually acts on.
 
-use serde::{Deserialize, Serialize};
-use tracing::instrument;
 #[allow(unused_imports)]
 use metrics;
+use serde::{Deserialize, Serialize};
+use tracing::instrument;
 
 use crate::classifier::{ClassifierOutput, RouteLabel};
 use crate::config::SieveConfig;
@@ -29,15 +29,9 @@ use grist_event::GristEvent;
 #[serde(tag = "route", rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum RouteDecision {
     /// Handle entirely with a local ONNX/GGUF model via Grinders.
-    LocalMl {
-        model_id: String,
-        confidence: f32,
-    },
+    LocalMl { model_id: String, confidence: f32 },
     /// Handle with a deterministic rule or template engine.
-    Rules {
-        rule_id: String,
-        confidence: f32,
-    },
+    Rules { rule_id: String, confidence: f32 },
     /// Pre-process locally then send a compact context to the LLM.
     Hybrid {
         local_model: String,
@@ -262,10 +256,7 @@ mod tests {
     }
 
     fn event(text: &str) -> GristEvent {
-        GristEvent::new(
-            ChannelType::Http,
-            serde_json::json!({ "text": text }),
-        )
+        GristEvent::new(ChannelType::Http, serde_json::json!({ "text": text }))
     }
 
     fn output(label: RouteLabel, confidence: f32) -> ClassifierOutput {
@@ -303,7 +294,10 @@ mod tests {
     #[test]
     fn high_confidence_hybrid_stays_hybrid() {
         let decision = oracle()
-            .evaluate(output(RouteLabel::Hybrid, 0.88), &event("summarise and refine"))
+            .evaluate(
+                output(RouteLabel::Hybrid, 0.88),
+                &event("summarise and refine"),
+            )
             .unwrap();
         assert!(matches!(decision, RouteDecision::Hybrid { .. }));
     }
@@ -361,10 +355,7 @@ mod tests {
     #[test]
     fn llm_needed_involves_llm() {
         let decision = oracle()
-            .evaluate(
-                output(RouteLabel::LlmNeeded, 0.90),
-                &event("complex"),
-            )
+            .evaluate(output(RouteLabel::LlmNeeded, 0.90), &event("complex"))
             .unwrap();
         assert!(decision.involves_llm());
     }

@@ -108,28 +108,19 @@ impl GateEvaluator {
         // "has_text" — payload must have a non-empty "text" field
         predicates.insert(
             "has_text".into(),
-            Box::new(|ctx: &Value| {
-                ctx["text"]
-                    .as_str()
-                    .map(|s| !s.is_empty())
-                    .unwrap_or(false)
-            }),
+            Box::new(|ctx: &Value| ctx["text"].as_str().map(|s| !s.is_empty()).unwrap_or(false)),
         );
 
         // "high_confidence" — context must have confidence >= 0.85
         predicates.insert(
             "high_confidence".into(),
-            Box::new(|ctx: &Value| {
-                ctx["confidence"].as_f64().unwrap_or(0.0) >= 0.85
-            }),
+            Box::new(|ctx: &Value| ctx["confidence"].as_f64().unwrap_or(0.0) >= 0.85),
         );
 
         // "low_cost" — estimated_cost_usd < 0.01
         predicates.insert(
             "low_cost".into(),
-            Box::new(|ctx: &Value| {
-                ctx["estimated_cost_usd"].as_f64().unwrap_or(f64::MAX) < 0.01
-            }),
+            Box::new(|ctx: &Value| ctx["estimated_cost_usd"].as_f64().unwrap_or(f64::MAX) < 0.01),
         );
 
         Self {
@@ -169,28 +160,31 @@ impl GateEvaluator {
 
             GateType::AlwaysClosed { reason } => {
                 debug!(step_id, reason, "gate AlwaysClosed");
-                Ok(GateDecision::Closed { reason: reason.clone() })
+                Ok(GateDecision::Closed {
+                    reason: reason.clone(),
+                })
             }
 
-            GateType::Auto { predicate } => {
-                match self.predicates.get(predicate.as_str()) {
-                    Some(pred) => {
-                        let open = pred(context);
-                        debug!(step_id, predicate, open, "gate Auto evaluated");
-                        if open {
-                            Ok(GateDecision::Open)
-                        } else {
-                            Ok(GateDecision::Closed {
-                                reason: format!("predicate '{predicate}' returned false"),
-                            })
-                        }
-                    }
-                    None => {
-                        warn!(step_id, predicate, "unknown gate predicate; defaulting to Open");
+            GateType::Auto { predicate } => match self.predicates.get(predicate.as_str()) {
+                Some(pred) => {
+                    let open = pred(context);
+                    debug!(step_id, predicate, open, "gate Auto evaluated");
+                    if open {
                         Ok(GateDecision::Open)
+                    } else {
+                        Ok(GateDecision::Closed {
+                            reason: format!("predicate '{predicate}' returned false"),
+                        })
                     }
                 }
-            }
+                None => {
+                    warn!(
+                        step_id,
+                        predicate, "unknown gate predicate; defaulting to Open"
+                    );
+                    Ok(GateDecision::Open)
+                }
+            },
 
             GateType::Channel { channel } => {
                 let (tx, rx) = oneshot::channel();
@@ -260,7 +254,10 @@ mod tests {
     #[tokio::test]
     async fn always_open_passes() {
         let ev = evaluator();
-        let d = ev.evaluate("step", &GateType::AlwaysOpen, &json!({}), None).await.unwrap();
+        let d = ev
+            .evaluate("step", &GateType::AlwaysOpen, &json!({}), None)
+            .await
+            .unwrap();
         assert_eq!(d, GateDecision::Open);
     }
 
@@ -268,7 +265,14 @@ mod tests {
     async fn always_closed_rejects() {
         let ev = evaluator();
         let d = ev
-            .evaluate("step", &GateType::AlwaysClosed { reason: "nope".into() }, &json!({}), None)
+            .evaluate(
+                "step",
+                &GateType::AlwaysClosed {
+                    reason: "nope".into(),
+                },
+                &json!({}),
+                None,
+            )
             .await
             .unwrap();
         assert!(matches!(d, GateDecision::Closed { .. }));
@@ -278,7 +282,14 @@ mod tests {
     async fn auto_always_true_predicate_opens() {
         let ev = evaluator();
         let d = ev
-            .evaluate("step", &GateType::Auto { predicate: "always_true".into() }, &json!({}), None)
+            .evaluate(
+                "step",
+                &GateType::Auto {
+                    predicate: "always_true".into(),
+                },
+                &json!({}),
+                None,
+            )
             .await
             .unwrap();
         assert_eq!(d, GateDecision::Open);
@@ -288,7 +299,14 @@ mod tests {
     async fn auto_always_false_predicate_closes() {
         let ev = evaluator();
         let d = ev
-            .evaluate("step", &GateType::Auto { predicate: "always_false".into() }, &json!({}), None)
+            .evaluate(
+                "step",
+                &GateType::Auto {
+                    predicate: "always_false".into(),
+                },
+                &json!({}),
+                None,
+            )
             .await
             .unwrap();
         assert!(matches!(d, GateDecision::Closed { .. }));
@@ -298,7 +316,14 @@ mod tests {
     async fn has_text_predicate_with_text_opens() {
         let ev = evaluator();
         let d = ev
-            .evaluate("step", &GateType::Auto { predicate: "has_text".into() }, &json!({ "text": "hello" }), None)
+            .evaluate(
+                "step",
+                &GateType::Auto {
+                    predicate: "has_text".into(),
+                },
+                &json!({ "text": "hello" }),
+                None,
+            )
             .await
             .unwrap();
         assert_eq!(d, GateDecision::Open);
@@ -308,7 +333,14 @@ mod tests {
     async fn has_text_predicate_without_text_closes() {
         let ev = evaluator();
         let d = ev
-            .evaluate("step", &GateType::Auto { predicate: "has_text".into() }, &json!({}), None)
+            .evaluate(
+                "step",
+                &GateType::Auto {
+                    predicate: "has_text".into(),
+                },
+                &json!({}),
+                None,
+            )
             .await
             .unwrap();
         assert!(matches!(d, GateDecision::Closed { .. }));
@@ -326,7 +358,9 @@ mod tests {
         let d = ev
             .evaluate(
                 "step-approve",
-                &GateType::Channel { channel: "slack:#ops".into() },
+                &GateType::Channel {
+                    channel: "slack:#ops".into(),
+                },
                 &json!({}),
                 None,
             )
@@ -341,7 +375,9 @@ mod tests {
         let result = ev
             .evaluate(
                 "step-timeout",
-                &GateType::Channel { channel: "slack:#ops".into() },
+                &GateType::Channel {
+                    channel: "slack:#ops".into(),
+                },
                 &json!({}),
                 Some(Duration::from_millis(10)), // very short for test
             )
@@ -353,7 +389,14 @@ mod tests {
     async fn unknown_predicate_defaults_to_open() {
         let ev = evaluator();
         let d = ev
-            .evaluate("step", &GateType::Auto { predicate: "nonexistent".into() }, &json!({}), None)
+            .evaluate(
+                "step",
+                &GateType::Auto {
+                    predicate: "nonexistent".into(),
+                },
+                &json!({}),
+                None,
+            )
             .await
             .unwrap();
         assert_eq!(d, GateDecision::Open);
@@ -374,15 +417,23 @@ mod tests {
         let _handle = tokio::spawn(async move {
             ev2.evaluate(
                 "step-pending",
-                &GateType::Channel { channel: "slack:#test".into() },
+                &GateType::Channel {
+                    channel: "slack:#test".into(),
+                },
                 &json!({}),
                 Some(Duration::from_secs(5)),
-            ).await
+            )
+            .await
         });
 
         // Give the spawn a moment to register the pending gate.
         tokio::time::sleep(Duration::from_millis(5)).await;
         assert_eq!(ev.pending_count(), 1);
-        ev.resolve("step-pending", GateDecision::Closed { reason: "test".into() });
+        ev.resolve(
+            "step-pending",
+            GateDecision::Closed {
+                reason: "test".into(),
+            },
+        );
     }
 }

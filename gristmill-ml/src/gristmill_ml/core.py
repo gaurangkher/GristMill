@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 import warnings
-from typing import Any, Optional
+from typing import Optional
 
 HAS_NATIVE: bool = False
 

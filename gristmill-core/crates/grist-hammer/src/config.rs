@@ -43,7 +43,10 @@ pub struct ProvidersConfig {
 
 impl Default for ProvidersConfig {
     fn default() -> Self {
-        Self { anthropic: AnthropicConfig::default(), ollama: OllamaConfig::default() }
+        Self {
+            anthropic: AnthropicConfig::default(),
+            ollama: OllamaConfig::default(),
+        }
     }
 }
 
@@ -63,9 +66,15 @@ pub struct AnthropicConfig {
     pub base_url: String,
 }
 
-fn default_anthropic_model() -> String { "claude-sonnet-4-20250514".into() }
-fn default_anthropic_fallback_model() -> String { "claude-haiku-4-5-20251001".into() }
-fn default_anthropic_base_url() -> String { "https://api.anthropic.com".into() }
+fn default_anthropic_model() -> String {
+    "claude-sonnet-4-20250514".into()
+}
+fn default_anthropic_fallback_model() -> String {
+    "claude-haiku-4-5-20251001".into()
+}
+fn default_anthropic_base_url() -> String {
+    "https://api.anthropic.com".into()
+}
 
 impl Default for AnthropicConfig {
     fn default() -> Self {
@@ -90,12 +99,19 @@ pub struct OllamaConfig {
     pub model: String,
 }
 
-fn default_ollama_base_url() -> String { "http://localhost:11434".into() }
-fn default_ollama_model() -> String { "llama3.1:8b".into() }
+fn default_ollama_base_url() -> String {
+    "http://localhost:11434".into()
+}
+fn default_ollama_model() -> String {
+    "llama3.1:8b".into()
+}
 
 impl Default for OllamaConfig {
     fn default() -> Self {
-        Self { base_url: default_ollama_base_url(), model: default_ollama_model() }
+        Self {
+            base_url: default_ollama_base_url(),
+            model: default_ollama_model(),
+        }
     }
 }
 
@@ -113,12 +129,19 @@ pub struct BudgetConfig {
     pub monthly_tokens: u64,
 }
 
-fn default_daily_tokens() -> u64 { 500_000 }
-fn default_monthly_tokens() -> u64 { 10_000_000 }
+fn default_daily_tokens() -> u64 {
+    500_000
+}
+fn default_monthly_tokens() -> u64 {
+    10_000_000
+}
 
 impl Default for BudgetConfig {
     fn default() -> Self {
-        Self { daily_tokens: default_daily_tokens(), monthly_tokens: default_monthly_tokens() }
+        Self {
+            daily_tokens: default_daily_tokens(),
+            monthly_tokens: default_monthly_tokens(),
+        }
     }
 }
 
@@ -145,10 +168,18 @@ pub struct CacheConfig {
     pub ttl_secs: u64,
 }
 
-fn default_cache_enabled() -> bool { true }
-fn default_similarity_threshold() -> f32 { 0.92 }
-fn default_max_entries() -> usize { 50_000 }
-fn default_embedding_dim() -> usize { 384 }
+fn default_cache_enabled() -> bool {
+    true
+}
+fn default_similarity_threshold() -> f32 {
+    0.92
+}
+fn default_max_entries() -> usize {
+    50_000
+}
+fn default_embedding_dim() -> usize {
+    384
+}
 
 impl Default for CacheConfig {
     fn default() -> Self {
@@ -179,9 +210,15 @@ pub struct BatchConfig {
     pub max_batch_size: usize,
 }
 
-fn default_batch_enabled() -> bool { true }
-fn default_window_ms() -> u64 { 5000 }
-fn default_max_batch_size() -> usize { 10 }
+fn default_batch_enabled() -> bool {
+    true
+}
+fn default_window_ms() -> u64 {
+    5000
+}
+fn default_max_batch_size() -> usize {
+    10
+}
 
 impl Default for BatchConfig {
     fn default() -> Self {
@@ -210,7 +247,10 @@ mod tests {
         assert_eq!(c.cache.max_entries, 50_000);
         assert_eq!(c.batch.window_ms, 5000);
         assert_eq!(c.batch.max_batch_size, 10);
-        assert_eq!(c.providers.anthropic.default_model, "claude-sonnet-4-20250514");
+        assert_eq!(
+            c.providers.anthropic.default_model,
+            "claude-sonnet-4-20250514"
+        );
         assert_eq!(c.providers.ollama.model, "llama3.1:8b");
     }
 

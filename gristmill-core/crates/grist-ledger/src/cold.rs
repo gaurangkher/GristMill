@@ -39,7 +39,9 @@ impl ColdTier {
     pub fn new(config: &ColdConfig) -> Result<Self, LedgerError> {
         fs::create_dir_all(&config.archive_dir)?;
         info!(archive_dir = %config.archive_dir.display(), "cold tier initialised");
-        Ok(Self { config: config.clone() })
+        Ok(Self {
+            config: config.clone(),
+        })
     }
 
     /// Archive a memory to the current month's `.jsonl.zst` file.
@@ -185,7 +187,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let cold = make_cold(&dir);
         for i in 0..5 {
-            cold.archive(&Memory::new(format!("memory {i}"), vec![])).unwrap();
+            cold.archive(&Memory::new(format!("memory {i}"), vec![]))
+                .unwrap();
         }
         let results = cold.search("memory", 10).unwrap();
         assert_eq!(results.len(), 5);
@@ -203,15 +206,25 @@ mod tests {
         let path_feb = cold.archive_path_for_month("2024-02");
 
         // Archive to jan.
-        let f_jan = std::fs::OpenOptions::new().create(true).append(true).open(&path_jan).unwrap();
+        let f_jan = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path_jan)
+            .unwrap();
         let mut enc = zstd::stream::write::Encoder::new(f_jan, 1).unwrap();
-        enc.write_all((serde_json::to_string(&m1).unwrap() + "\n").as_bytes()).unwrap();
+        enc.write_all((serde_json::to_string(&m1).unwrap() + "\n").as_bytes())
+            .unwrap();
         enc.finish().unwrap();
 
         // Archive to feb.
-        let f_feb = std::fs::OpenOptions::new().create(true).append(true).open(&path_feb).unwrap();
+        let f_feb = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path_feb)
+            .unwrap();
         let mut enc = zstd::stream::write::Encoder::new(f_feb, 1).unwrap();
-        enc.write_all((serde_json::to_string(&m2).unwrap() + "\n").as_bytes()).unwrap();
+        enc.write_all((serde_json::to_string(&m2).unwrap() + "\n").as_bytes())
+            .unwrap();
         enc.finish().unwrap();
 
         let archives = cold.list_archives().unwrap();

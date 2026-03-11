@@ -53,12 +53,12 @@ impl StepType {
     /// Human-readable label for metrics and logging.
     pub fn kind_label(&self) -> &'static str {
         match self {
-            StepType::LocalMl { .. }     => "local_ml",
-            StepType::Rule { .. }        => "rule",
-            StepType::Llm { .. }         => "llm",
-            StepType::External { .. }    => "external",
-            StepType::Gate { .. }        => "gate",
-            StepType::PythonCall { .. }  => "python_call",
+            StepType::LocalMl { .. } => "local_ml",
+            StepType::Rule { .. } => "rule",
+            StepType::Llm { .. } => "llm",
+            StepType::External { .. } => "external",
+            StepType::Gate { .. } => "gate",
+            StepType::PythonCall { .. } => "python_call",
             StepType::TypeScriptCall { .. } => "typescript_call",
         }
     }
@@ -380,13 +380,21 @@ mod tests {
     use super::*;
 
     fn ml_step(id: &str) -> Step {
-        Step::new(id, StepType::LocalMl { model_id: "test-model".into() })
+        Step::new(
+            id,
+            StepType::LocalMl {
+                model_id: "test-model".into(),
+            },
+        )
     }
 
     #[test]
     fn empty_pipeline_fails_validation() {
         let p = Pipeline::new("empty");
-        assert!(matches!(p.validate(), Err(MillwrightError::EmptyPipeline(_))));
+        assert!(matches!(
+            p.validate(),
+            Err(MillwrightError::EmptyPipeline(_))
+        ));
     }
 
     #[test]
@@ -404,7 +412,11 @@ mod tests {
             .with_step(ml_step("c").with_deps(["b"]));
         let order = p.validate().unwrap();
         // a must precede b which must precede c
-        let pos: HashMap<&str, usize> = order.iter().enumerate().map(|(i, s)| (s.as_str(), i)).collect();
+        let pos: HashMap<&str, usize> = order
+            .iter()
+            .enumerate()
+            .map(|(i, s)| (s.as_str(), i))
+            .collect();
         assert!(pos["a"] < pos["b"]);
         assert!(pos["b"] < pos["c"]);
     }
@@ -414,14 +426,19 @@ mod tests {
         let p = Pipeline::new("cycle")
             .with_step(ml_step("a").with_deps(["b"]))
             .with_step(ml_step("b").with_deps(["a"]));
-        assert!(matches!(p.validate(), Err(MillwrightError::CyclicDependency { .. })));
+        assert!(matches!(
+            p.validate(),
+            Err(MillwrightError::CyclicDependency { .. })
+        ));
     }
 
     #[test]
     fn unknown_dep_is_detected() {
-        let p = Pipeline::new("unknown")
-            .with_step(ml_step("a").with_deps(["ghost"]));
-        assert!(matches!(p.validate(), Err(MillwrightError::UnknownDependency { .. })));
+        let p = Pipeline::new("unknown").with_step(ml_step("a").with_deps(["ghost"]));
+        assert!(matches!(
+            p.validate(),
+            Err(MillwrightError::UnknownDependency { .. })
+        ));
     }
 
     #[test]
@@ -433,7 +450,11 @@ mod tests {
             .with_step(ml_step("c").with_deps(["a"]))
             .with_step(ml_step("d").with_deps(["b", "c"]));
         let order = p.validate().unwrap();
-        let pos: HashMap<&str, usize> = order.iter().enumerate().map(|(i, s)| (s.as_str(), i)).collect();
+        let pos: HashMap<&str, usize> = order
+            .iter()
+            .enumerate()
+            .map(|(i, s)| (s.as_str(), i))
+            .collect();
         assert!(pos["a"] < pos["b"]);
         assert!(pos["a"] < pos["c"]);
         assert!(pos["b"] < pos["d"]);
@@ -463,10 +484,35 @@ mod tests {
 
     #[test]
     fn step_type_kind_labels_are_correct() {
-        assert_eq!(StepType::LocalMl { model_id: "x".into() }.kind_label(), "local_ml");
-        assert_eq!(StepType::Rule { rule_id: "x".into() }.kind_label(), "rule");
-        assert_eq!(StepType::Gate { condition: "x".into() }.kind_label(), "gate");
-        assert!(StepType::Llm { prompt_template: "x".into(), max_tokens: 100 }.involves_llm());
-        assert!(!StepType::LocalMl { model_id: "x".into() }.involves_llm());
+        assert_eq!(
+            StepType::LocalMl {
+                model_id: "x".into()
+            }
+            .kind_label(),
+            "local_ml"
+        );
+        assert_eq!(
+            StepType::Rule {
+                rule_id: "x".into()
+            }
+            .kind_label(),
+            "rule"
+        );
+        assert_eq!(
+            StepType::Gate {
+                condition: "x".into()
+            }
+            .kind_label(),
+            "gate"
+        );
+        assert!(StepType::Llm {
+            prompt_template: "x".into(),
+            max_tokens: 100
+        }
+        .involves_llm());
+        assert!(!StepType::LocalMl {
+            model_id: "x".into()
+        }
+        .involves_llm());
     }
 }

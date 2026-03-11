@@ -50,8 +50,9 @@ impl GristMillCore {
     /// applied on top of the loaded or default config.
     pub async fn new(config_path: Option<PathBuf>) -> Result<Self, CoreError> {
         let cfg = match config_path {
-            Some(p) => GristMillConfig::load_from(p)
-                .map_err(|e| CoreError::config(e.to_string()))?,
+            Some(p) => {
+                GristMillConfig::load_from(p).map_err(|e| CoreError::config(e.to_string()))?
+            }
             None => GristMillConfig::default(),
         }
         .apply_env();
@@ -78,12 +79,20 @@ impl GristMillCore {
         let hammer = Hammer::new(build_hammer_config(&cfg)).map_err(CoreError::Hammer)?;
 
         // ── Millwright ───────────────────────────────────────────────────────
-        let millwright =
-            Millwright::new(build_millwright_config(&cfg, &workspace), Some(Arc::clone(&bus)))
-                .map_err(CoreError::Millwright)?;
+        let millwright = Millwright::new(
+            build_millwright_config(&cfg, &workspace),
+            Some(Arc::clone(&bus)),
+        )
+        .map_err(CoreError::Millwright)?;
 
         info!("GristMillCore ready");
-        Ok(Self { sieve, ledger, hammer, millwright, bus })
+        Ok(Self {
+            sieve,
+            ledger,
+            hammer,
+            millwright,
+            bus,
+        })
     }
 
     // ── Sieve ─────────────────────────────────────────────────────────────────
@@ -105,12 +114,11 @@ impl GristMillCore {
             .map_err(CoreError::Ledger)
     }
 
-    pub async fn recall(
-        &self,
-        query: &str,
-        limit: usize,
-    ) -> Result<Vec<RankedMemory>, CoreError> {
-        self.ledger.recall(query, limit).await.map_err(CoreError::Ledger)
+    pub async fn recall(&self, query: &str, limit: usize) -> Result<Vec<RankedMemory>, CoreError> {
+        self.ledger
+            .recall(query, limit)
+            .await
+            .map_err(CoreError::Ledger)
     }
 
     pub async fn get_memory(&self, id: &str) -> Result<Option<Memory>, CoreError> {
@@ -173,7 +181,11 @@ impl GristMillCore {
 
 /// Resolve `path` relative to `base` when it is not already absolute.
 fn resolve(path: &Path, base: &Path) -> PathBuf {
-    if path.is_absolute() { path.to_owned() } else { base.join(path) }
+    if path.is_absolute() {
+        path.to_owned()
+    } else {
+        base.join(path)
+    }
 }
 
 fn build_sieve_config(cfg: &GristMillConfig) -> SieveConfig {
@@ -296,17 +308,27 @@ fn build_ledger_config(cfg: &GristMillConfig, workspace: &Path) -> LedgerConfig 
 
 pub fn parse_channel(channel: &str) -> ChannelType {
     match channel.to_lowercase().as_str() {
-        "http"       => ChannelType::Http,
-        "websocket"  => ChannelType::WebSocket,
-        "cli"        => ChannelType::Cli,
-        "cron"       => ChannelType::Cron,
-        "webhook"    => ChannelType::Webhook { provider: "generic".into() },
-        "mq"         => ChannelType::MessageQueue { topic: "default".into() },
-        "fs"         => ChannelType::FileSystem { path: "/".into() },
-        "python"     => ChannelType::Python { callback_id: "default".into() },
-        "typescript" => ChannelType::TypeScript { adapter_id: "default".into() },
-        "internal"   => ChannelType::Internal { subsystem: "core".into() },
-        other        => {
+        "http" => ChannelType::Http,
+        "websocket" => ChannelType::WebSocket,
+        "cli" => ChannelType::Cli,
+        "cron" => ChannelType::Cron,
+        "webhook" => ChannelType::Webhook {
+            provider: "generic".into(),
+        },
+        "mq" => ChannelType::MessageQueue {
+            topic: "default".into(),
+        },
+        "fs" => ChannelType::FileSystem { path: "/".into() },
+        "python" => ChannelType::Python {
+            callback_id: "default".into(),
+        },
+        "typescript" => ChannelType::TypeScript {
+            adapter_id: "default".into(),
+        },
+        "internal" => ChannelType::Internal {
+            subsystem: "core".into(),
+        },
+        other => {
             tracing::warn!(channel = other, "unknown channel type, falling back to Cli");
             ChannelType::Cli
         }
@@ -329,21 +351,28 @@ mod tests {
         cfg.core.workspace = dir.path().to_owned();
         // Re-derive ledger paths from the temporary workspace.
         let workspace = dir.path();
-        let ledger_embedder = embedder::build_ledger_embedder(
-            &build_grinders_config(&cfg, workspace),
-        );
+        let ledger_embedder =
+            embedder::build_ledger_embedder(&build_grinders_config(&cfg, workspace));
         let ledger = Ledger::new(build_ledger_config(&cfg, workspace), ledger_embedder)
             .await
             .expect("ledger");
         let sieve = Sieve::new(build_sieve_config(&cfg)).expect("sieve");
         let bus = Arc::new(EventBus::default());
         let hammer = Hammer::new(build_hammer_config(&cfg)).expect("hammer");
-        let millwright =
-            Millwright::new(build_millwright_config(&cfg, workspace), Some(Arc::clone(&bus)))
-                .expect("millwright");
+        let millwright = Millwright::new(
+            build_millwright_config(&cfg, workspace),
+            Some(Arc::clone(&bus)),
+        )
+        .expect("millwright");
         // Keep `dir` alive for the duration of the test by leaking it.
         std::mem::forget(dir);
-        GristMillCore { sieve, ledger, hammer, millwright, bus }
+        GristMillCore {
+            sieve,
+            ledger,
+            hammer,
+            millwright,
+            bus,
+        }
     }
 
     #[test]
@@ -411,7 +440,12 @@ mod tests {
         use grist_millwright::{Pipeline, Step, StepType};
         let core = core_for_test().await;
         assert!(core.pipeline_ids().is_empty());
-        let step = Step::new("step-1", StepType::LocalMl { model_id: "noop".into() });
+        let step = Step::new(
+            "step-1",
+            StepType::LocalMl {
+                model_id: "noop".into(),
+            },
+        );
         let pipeline = Pipeline::new("pipe-1").with_step(step);
         core.register_pipeline(pipeline);
         assert_eq!(core.pipeline_ids(), vec!["pipe-1"]);
@@ -421,10 +455,8 @@ mod tests {
     async fn core_subscribe_and_publish() {
         let core = core_for_test().await;
         let mut sub = core.subscribe("test.topic");
-        core.bus.publish(
-            "test.topic",
-            serde_json::json!({"msg": "ping"}),
-        );
+        core.bus
+            .publish("test.topic", serde_json::json!({"msg": "ping"}));
         let evt = sub.try_recv();
         assert!(evt.is_ok());
     }
@@ -433,7 +465,11 @@ mod tests {
     fn config_wiring_sieve_maps_confidence_threshold() {
         use grist_config::{GristMillConfig, SieveConfig as CfgSieve};
         let mut cfg = GristMillConfig::default();
-        cfg.sieve = CfgSieve { confidence_threshold: 0.70, cache_size: 500, ..CfgSieve::default() };
+        cfg.sieve = CfgSieve {
+            confidence_threshold: 0.70,
+            cache_size: 500,
+            ..CfgSieve::default()
+        };
         let sc = build_sieve_config(&cfg);
         assert!((sc.confidence_threshold - 0.70).abs() < 1e-6);
         assert_eq!(sc.exact_cache_size, 500);
@@ -443,7 +479,10 @@ mod tests {
     fn config_wiring_hammer_maps_budget() {
         use grist_config::{GristMillConfig, HammerBudgetConfig};
         let mut cfg = GristMillConfig::default();
-        cfg.hammer.budget = HammerBudgetConfig { daily_tokens: 123_456, monthly_tokens: 9_999_999 };
+        cfg.hammer.budget = HammerBudgetConfig {
+            daily_tokens: 123_456,
+            monthly_tokens: 9_999_999,
+        };
         let hc = build_hammer_config(&cfg);
         assert_eq!(hc.budget.daily_tokens, 123_456);
         assert_eq!(hc.budget.monthly_tokens, 9_999_999);

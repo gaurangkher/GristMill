@@ -690,7 +690,10 @@ mod tests {
         assert_eq!(c.cache.max_entries, 50_000);
         assert_eq!(c.batch.window_ms, 5_000);
         assert_eq!(c.batch.max_batch_size, 10);
-        assert_eq!(c.providers.anthropic.default_model, "claude-sonnet-4-20250514");
+        assert_eq!(
+            c.providers.anthropic.default_model,
+            "claude-sonnet-4-20250514"
+        );
         assert_eq!(c.providers.ollama.model, "llama3.1:8b");
     }
 
@@ -747,7 +750,10 @@ mod tests {
         let c2: GristMillConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(c.core.log_level, c2.core.log_level);
         assert_eq!(c.hammer.budget.daily_tokens, c2.hammer.budget.daily_tokens);
-        assert_eq!(c.ledger.compaction.stale_days, c2.ledger.compaction.stale_days);
+        assert_eq!(
+            c.ledger.compaction.stale_days,
+            c2.ledger.compaction.stale_days
+        );
     }
 
     #[test]

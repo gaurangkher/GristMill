@@ -242,7 +242,10 @@ mod tests {
     #[test]
     fn starter_pack_phi3_is_cold() {
         let pack = starter_pack(std::path::Path::new("/tmp/models"));
-        let phi3 = pack.iter().find(|m| m.model_id == "phi3-mini-4k-Q4").unwrap();
+        let phi3 = pack
+            .iter()
+            .find(|m| m.model_id == "phi3-mini-4k-Q4")
+            .unwrap();
         assert!(!phi3.warm, "phi3 should be cold (2.3 GB)");
     }
 

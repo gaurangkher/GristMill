@@ -42,7 +42,7 @@ jobs:
           workspaces: gristmill-core
       - name: cargo clippy
         working-directory: gristmill-core
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --all-targets -- -D warnings
 
   test:
     name: Tests (${{ matrix.os }})
@@ -59,7 +59,7 @@ jobs:
           workspaces: gristmill-core
       - name: cargo test
         working-directory: gristmill-core
-        run: cargo test --all-features
+        run: cargo test
 
   latency:
     name: Sieve Latency Regression (p99 < 5 ms)

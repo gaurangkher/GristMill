@@ -16,8 +16,8 @@ use std::sync::Arc;
 use sha2::{Digest, Sha256};
 use tracing::{debug, info};
 
-pub mod budget;
 pub mod batcher;
+pub mod budget;
 pub mod cache;
 pub mod config;
 pub mod error;
@@ -92,12 +92,20 @@ impl Hammer {
         let hash = sha256_hex(&req.prompt);
         if let Some(cached) = self.cache.get_exact(&hash) {
             debug!(request_id = %req.id, "cache exact hit");
-            return Ok(EscalationResponse { cache_hit: true, request_id: req.id, ..cached });
+            return Ok(EscalationResponse {
+                cache_hit: true,
+                request_id: req.id,
+                ..cached
+            });
         }
         if let Some(emb) = &req.embedding {
             if let Some(cached) = self.cache.get_fuzzy(emb) {
                 debug!(request_id = %req.id, "cache fuzzy hit");
-                return Ok(EscalationResponse { cache_hit: true, request_id: req.id, ..cached });
+                return Ok(EscalationResponse {
+                    cache_hit: true,
+                    request_id: req.id,
+                    ..cached
+                });
             }
         }
 
@@ -148,10 +156,10 @@ fn sha256_hex(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
-    use crate::config::{BudgetConfig, CacheConfig, BatchConfig};
+    use crate::config::{BatchConfig, BudgetConfig, CacheConfig};
     use crate::router::{ProviderFn, RequestRouter};
     use crate::types::Provider;
+    use std::sync::Arc;
 
     // ── Mock provider helpers ─────────────────────────────────────────────
 
@@ -161,11 +169,12 @@ mod tests {
     }
 
     impl ProviderFn for MockProvider {
-        fn call(
-            &self,
-            _req: &EscalationRequest,
-        ) -> Result<(String, u32, Provider), HammerError> {
-            Ok((self.content.clone(), self.tokens, Provider::AnthropicPrimary))
+        fn call(&self, _req: &EscalationRequest) -> Result<(String, u32, Provider), HammerError> {
+            Ok((
+                self.content.clone(),
+                self.tokens,
+                Provider::AnthropicPrimary,
+            ))
         }
     }
 
@@ -185,11 +194,18 @@ mod tests {
         let config = HammerConfig {
             budget: budget.clone(),
             cache: cache.clone(),
-            batch: BatchConfig { enabled: true, window_ms: 50, max_batch_size: 10 },
+            batch: BatchConfig {
+                enabled: true,
+                window_ms: 50,
+                max_batch_size: 10,
+            },
             ..Default::default()
         };
         let providers: Vec<Arc<dyn ProviderFn>> = vec![Arc::new(provider)];
-        let router = Arc::new(RequestRouter::with_mock_providers(config.clone(), providers));
+        let router = Arc::new(RequestRouter::with_mock_providers(
+            config.clone(),
+            providers,
+        ));
         let batcher = RequestBatcher::new(config.batch.clone(), Arc::clone(&router));
         Hammer {
             budget: BudgetManager::new(budget),
@@ -200,7 +216,10 @@ mod tests {
     }
 
     fn default_budget() -> BudgetConfig {
-        BudgetConfig { daily_tokens: 100_000, monthly_tokens: 1_000_000 }
+        BudgetConfig {
+            daily_tokens: 100_000,
+            monthly_tokens: 1_000_000,
+        }
     }
 
     fn default_cache() -> CacheConfig {
@@ -212,7 +231,10 @@ mod tests {
     #[tokio::test]
     async fn escalate_happy_path() {
         let hammer = make_hammer_with_provider(
-            MockProvider { content: "42".into(), tokens: 20 },
+            MockProvider {
+                content: "42".into(),
+                tokens: 20,
+            },
             default_budget(),
             default_cache(),
         );
@@ -226,27 +248,42 @@ mod tests {
     #[tokio::test]
     async fn escalate_cache_hit() {
         let hammer = make_hammer_with_provider(
-            MockProvider { content: "cached".into(), tokens: 10 },
+            MockProvider {
+                content: "cached".into(),
+                tokens: 10,
+            },
             default_budget(),
             default_cache(),
         );
         let prompt = "repeat me".to_string();
 
         // First call — populates cache.
-        let r1 = hammer.escalate(EscalationRequest::new(&prompt, 50)).await.unwrap();
+        let r1 = hammer
+            .escalate(EscalationRequest::new(&prompt, 50))
+            .await
+            .unwrap();
         assert!(!r1.cache_hit);
 
         // Second call — should hit cache.
-        let r2 = hammer.escalate(EscalationRequest::new(&prompt, 50)).await.unwrap();
+        let r2 = hammer
+            .escalate(EscalationRequest::new(&prompt, 50))
+            .await
+            .unwrap();
         assert!(r2.cache_hit, "second call should be a cache hit");
         assert_eq!(r2.content, "cached");
     }
 
     #[tokio::test]
     async fn escalate_budget_enforced() {
-        let tight_budget = BudgetConfig { daily_tokens: 5, monthly_tokens: 1_000_000 };
+        let tight_budget = BudgetConfig {
+            daily_tokens: 5,
+            monthly_tokens: 1_000_000,
+        };
         let hammer = make_hammer_with_provider(
-            MockProvider { content: "x".into(), tokens: 10 },
+            MockProvider {
+                content: "x".into(),
+                tokens: 10,
+            },
             tight_budget,
             default_cache(),
         );
@@ -259,7 +296,10 @@ mod tests {
     #[tokio::test]
     async fn get_budget_info() {
         let hammer = make_hammer_with_provider(
-            MockProvider { content: "hi".into(), tokens: 30 },
+            MockProvider {
+                content: "hi".into(),
+                tokens: 30,
+            },
             default_budget(),
             default_cache(),
         );
@@ -276,7 +316,10 @@ mod tests {
     #[tokio::test]
     async fn clear_cache_empties() {
         let hammer = make_hammer_with_provider(
-            MockProvider { content: "hi".into(), tokens: 5 },
+            MockProvider {
+                content: "hi".into(),
+                tokens: 5,
+            },
             default_budget(),
             default_cache(),
         );
@@ -290,16 +333,14 @@ mod tests {
 
     #[tokio::test]
     async fn escalate_all_providers_fail() {
-        let hammer = make_hammer_with_provider(
-            AlwaysFailProvider,
-            default_budget(),
-            default_cache(),
-        );
+        let hammer =
+            make_hammer_with_provider(AlwaysFailProvider, default_budget(), default_cache());
         let req = EscalationRequest::new("fail me", 50);
         let err = hammer.escalate(req).await.unwrap_err();
         assert!(
             matches!(err, HammerError::AllProvidersFailed(_)),
-            "unexpected error: {:?}", err
+            "unexpected error: {:?}",
+            err
         );
     }
 

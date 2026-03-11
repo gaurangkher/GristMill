@@ -84,9 +84,7 @@ impl Compactor {
     // ── Step 1: demote stale warm memories to cold ───────────────────────────
 
     async fn demote_stale(&self) -> Result<(), LedgerError> {
-        let stale_ms = now_ms().saturating_sub(
-            self.config.stale_days * 24 * 3600 * 1000,
-        );
+        let stale_ms = now_ms().saturating_sub(self.config.stale_days * 24 * 3600 * 1000);
 
         let warm = Arc::clone(&self.warm);
         let stale_memories = tokio::task::spawn_blocking(move || warm.find_stale(stale_ms))
@@ -177,7 +175,8 @@ impl Compactor {
             let mem = neighbours.unwrap();
 
             // Find keyword-similar entries as dedup candidates.
-            let first_words: String = mem.content
+            let first_words: String = mem
+                .content
                 .split_whitespace()
                 .take(3)
                 .collect::<Vec<_>>()
@@ -240,24 +239,30 @@ mod tests {
     use super::*;
     use crate::cold::ColdTier;
     use crate::config::{ColdConfig, WarmConfig};
+    use crate::embedder::l2_normalize;
     use crate::memory::Memory;
     use crate::warm::WarmTier;
-    use crate::embedder::l2_normalize;
 
     fn make_warm(dir: &tempfile::TempDir) -> Arc<WarmTier> {
-        Arc::new(WarmTier::open(&WarmConfig {
-            db_path: dir.path().join("warm.db"),
-            vector_index_path: dir.path().join("vec.usearch"),
-            embedding_dim: 4,
-            vector_capacity: 100,
-        }).unwrap())
+        Arc::new(
+            WarmTier::open(&WarmConfig {
+                db_path: dir.path().join("warm.db"),
+                vector_index_path: dir.path().join("vec.usearch"),
+                embedding_dim: 4,
+                vector_capacity: 100,
+            })
+            .unwrap(),
+        )
     }
 
     fn make_cold(dir: &tempfile::TempDir) -> Arc<ColdTier> {
-        Arc::new(ColdTier::new(&ColdConfig {
-            archive_dir: dir.path().join("cold"),
-            compress_level: 1,
-        }).unwrap())
+        Arc::new(
+            ColdTier::new(&ColdConfig {
+                archive_dir: dir.path().join("cold"),
+                compress_level: 1,
+            })
+            .unwrap(),
+        )
     }
 
     fn make_compactor(warm: Arc<WarmTier>, cold: Arc<ColdTier>) -> Compactor {
@@ -298,12 +303,18 @@ mod tests {
         compactor.compact_cycle().await.unwrap();
 
         // Stale memory should now be in cold and removed from warm.
-        assert!(warm.get(&m.id).unwrap().is_none(), "stale memory should be removed from warm");
+        assert!(
+            warm.get(&m.id).unwrap().is_none(),
+            "stale memory should be removed from warm"
+        );
         let cold_results = cold.search("stale content for demotion", 5).unwrap();
         assert!(!cold_results.is_empty(), "stale memory should be in cold");
 
         // Fresh memory should still be in warm.
-        assert!(warm.get(&fresh.id).unwrap().is_some(), "fresh memory should remain in warm");
+        assert!(
+            warm.get(&fresh.id).unwrap().is_some(),
+            "fresh memory should remain in warm"
+        );
     }
 
     #[tokio::test]

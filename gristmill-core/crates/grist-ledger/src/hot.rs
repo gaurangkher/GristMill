@@ -16,7 +16,7 @@ use tracing::{debug, warn};
 
 use crate::config::HotConfig;
 use crate::error::LedgerError;
-use crate::memory::{Memory, MemoryId, Tier, now_ms};
+use crate::memory::{now_ms, Memory, MemoryId, Tier};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HotTier
@@ -57,7 +57,12 @@ impl HotTier {
         let cap = std::num::NonZeroUsize::new(config.lru_capacity.max(1)).unwrap();
         let lru = Mutex::new(LruCache::new(cap));
 
-        Ok(Self { lru, sled, evict_tx, config: config.clone() })
+        Ok(Self {
+            lru,
+            sled,
+            evict_tx,
+            config: config.clone(),
+        })
     }
 
     /// Insert a memory and its embedding into the hot tier.
@@ -70,7 +75,9 @@ impl HotTier {
 
         let mut lru = self.lru.lock();
         // `push` returns the evicted entry when capacity is reached.
-        if let Some((_evicted_id, evicted)) = lru.push(id.clone(), (memory.clone(), embedding.clone())) {
+        if let Some((_evicted_id, evicted)) =
+            lru.push(id.clone(), (memory.clone(), embedding.clone()))
+        {
             // Persist to sled (best-effort; non-fatal if it fails).
             let bytes = serde_json::to_vec(&evicted.0)?;
             if let Err(e) = self.sled.insert(evicted.0.id.as_bytes(), bytes.as_slice()) {
@@ -138,7 +145,10 @@ mod tests {
     use std::sync::Arc;
     use tokio::sync::mpsc;
 
-    fn make_hot(tmp: &tempfile::TempDir, cap: usize) -> (Arc<HotTier>, mpsc::UnboundedReceiver<(Memory, Vec<f32>)>) {
+    fn make_hot(
+        tmp: &tempfile::TempDir,
+        cap: usize,
+    ) -> (Arc<HotTier>, mpsc::UnboundedReceiver<(Memory, Vec<f32>)>) {
         let (tx, rx) = mpsc::unbounded_channel();
         let config = HotConfig {
             lru_capacity: cap,

@@ -20,7 +20,7 @@ import type {
   NotificationChannel,
   StepExecutor,
 } from "./types.js";
-import type { GristMillBridge } from "../core/bridge.js";
+import type { IBridge } from "../core/bridge.js";
 
 // ── Registry ──────────────────────────────────────────────────────────────────
 
@@ -97,7 +97,7 @@ export class PluginRegistry {
    * Call each plugin's `register()` method with a `PluginContext` bound to
    * `bridge`.  Collects adapters, channels, and step-types.
    */
-  async register(bridge: GristMillBridge): Promise<void> {
+  async register(bridge: IBridge): Promise<void> {
     for (const plugin of this.plugins.values()) {
       const ctx = this._makeContext(bridge, plugin.name);
       try {
@@ -130,7 +130,7 @@ export class PluginRegistry {
 
   // ── Private ────────────────────────────────────────────────────────────────
 
-  private _makeContext(bridge: GristMillBridge, pluginName: string): PluginContext {
+  private _makeContext(bridge: IBridge, pluginName: string): PluginContext {
     const registry = this;
     return {
       bridge,

@@ -277,7 +277,10 @@ mod tests {
     fn cosine_similarity_same_vec() {
         let v = vec![0.6_f32, 0.8, 0.0, 0.0];
         let sim = cosine_similarity(&v, &v);
-        assert!((sim - 1.0).abs() < 1e-5, "sim with self should be 1.0, got {sim}");
+        assert!(
+            (sim - 1.0).abs() < 1e-5,
+            "sim with self should be 1.0, got {sim}"
+        );
     }
 
     #[test]

@@ -87,10 +87,7 @@ impl Ledger {
     /// and the background compactor.
     ///
     /// **Must be called inside a Tokio runtime.**
-    pub async fn new(
-        config: Cfg,
-        embedder: Arc<dyn Embedder>,
-    ) -> Result<Self, LedgerError> {
+    pub async fn new(config: Cfg, embedder: Arc<dyn Embedder>) -> Result<Self, LedgerError> {
         info!("initialising three-tier ledger");
 
         // ── Build tiers (blocking I/O) ─────────────────────────────────────
@@ -102,11 +99,9 @@ impl Ledger {
         let (evict_tx, evict_rx) = mpsc::unbounded_channel::<(Memory, Vec<f32>)>();
 
         // Open sled (blocking).
-        let hot = tokio::task::spawn_blocking(move || {
-            HotTier::open(&hot_cfg, evict_tx)
-        })
-        .await
-        .map_err(|e| LedgerError::Other(e.into()))??;
+        let hot = tokio::task::spawn_blocking(move || HotTier::open(&hot_cfg, evict_tx))
+            .await
+            .map_err(|e| LedgerError::Other(e.into()))??;
         let hot = Arc::new(hot);
 
         // Open SQLite + usearch (blocking).
@@ -124,11 +119,7 @@ impl Ledger {
         let evict_task = tokio::spawn(eviction_drainer(evict_rx, warm_for_evict));
 
         // ── Compactor ─────────────────────────────────────────────────────
-        let compactor = Compactor::spawn(
-            Arc::clone(&warm),
-            Arc::clone(&cold),
-            compactor_cfg,
-        );
+        let compactor = Compactor::spawn(Arc::clone(&warm), Arc::clone(&cold), compactor_cfg);
 
         info!("ledger ready");
         Ok(Self {
@@ -167,11 +158,9 @@ impl Ledger {
         // ── Duplicate check in warm ────────────────────────────────────────
         let warm = Arc::clone(&self.warm);
         let emb_clone = embedding.clone();
-        let existing = tokio::task::spawn_blocking(move || {
-            warm.find_similar(&emb_clone, 0.95)
-        })
-        .await
-        .map_err(|e| LedgerError::Other(e.into()))??;
+        let existing = tokio::task::spawn_blocking(move || warm.find_similar(&emb_clone, 0.95))
+            .await
+            .map_err(|e| LedgerError::Other(e.into()))??;
 
         if let Some(existing_mem) = existing {
             debug!(existing_id = %existing_mem.id, "duplicate memory found — merging");
@@ -241,8 +230,12 @@ impl Ledger {
                 let kw = keyword_hits.iter().any(|(kid, _)| kid == id);
                 let vec = vector_hits.iter().any(|(vid, _)| vid == id);
                 let mut sources = vec![];
-                if kw { sources.push(SearchSource::Keyword); }
-                if vec { sources.push(SearchSource::Vector); }
+                if kw {
+                    sources.push(SearchSource::Keyword);
+                }
+                if vec {
+                    sources.push(SearchSource::Vector);
+                }
                 (id.as_str(), (*score, sources))
             })
             .collect();
@@ -254,11 +247,19 @@ impl Ledger {
                     .get(mem.id.as_str())
                     .cloned()
                     .unwrap_or((0.0, vec![]));
-                RankedMemory { memory: mem, score, sources }
+                RankedMemory {
+                    memory: mem,
+                    score,
+                    sources,
+                }
             })
             .collect();
 
-        ranked.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        ranked.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         // ── Touch accessed memories ────────────────────────────────────────
         for r in &ranked {
@@ -267,8 +268,7 @@ impl Ledger {
             let _ = tokio::task::spawn_blocking(move || warm_touch.touch(&id)).await;
         }
 
-        metrics::histogram!("ledger.recall.results_count")
-            .record(ranked.len() as f64);
+        metrics::histogram!("ledger.recall.results_count").record(ranked.len() as f64);
         Ok(ranked)
     }
 
@@ -364,7 +364,10 @@ mod tests {
 
     async fn make_ledger(tmp: &tempfile::TempDir) -> Ledger {
         let config = LedgerConfig {
-            hot: HotConfig { lru_capacity: 4, sled_path: tmp.path().join("sled") },
+            hot: HotConfig {
+                lru_capacity: 4,
+                sled_path: tmp.path().join("sled"),
+            },
             warm: WarmConfig {
                 db_path: tmp.path().join("warm.db"),
                 vector_index_path: tmp.path().join("vec.usearch"),
@@ -387,7 +390,10 @@ mod tests {
     async fn noop_remember_and_recall() {
         let dir = tempfile::tempdir().unwrap();
         let ledger = make_ledger(&dir).await;
-        let id = ledger.remember("meeting with Alice at 10am", vec![]).await.unwrap();
+        let id = ledger
+            .remember("meeting with Alice at 10am", vec![])
+            .await
+            .unwrap();
         assert!(!id.is_empty());
     }
 
@@ -395,9 +401,15 @@ mod tests {
     async fn get_existing_memory() {
         let dir = tempfile::tempdir().unwrap();
         let ledger = make_ledger(&dir).await;
-        let id = ledger.remember("retrievable memory content", vec![]).await.unwrap();
+        let id = ledger
+            .remember("retrievable memory content", vec![])
+            .await
+            .unwrap();
         let mem = ledger.get(&id).await.unwrap();
-        assert!(mem.is_some(), "recently stored memory should be retrievable via get()");
+        assert!(
+            mem.is_some(),
+            "recently stored memory should be retrievable via get()"
+        );
     }
 
     #[tokio::test]
@@ -415,13 +427,19 @@ mod tests {
 
         // Insert into hot; force eviction to warm by inserting more than lru_capacity (4).
         for i in 0..6 {
-            ledger.remember(format!("memory entry number {i} about scheduling"), vec![]).await.unwrap();
+            ledger
+                .remember(format!("memory entry number {i} about scheduling"), vec![])
+                .await
+                .unwrap();
         }
         // Give the eviction drainer a moment to process.
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
         let results = ledger.recall("scheduling", 10).await.unwrap();
-        assert!(!results.is_empty(), "recall should return results after remember");
+        assert!(
+            !results.is_empty(),
+            "recall should return results after remember"
+        );
     }
 
     #[tokio::test]
@@ -432,7 +450,10 @@ mod tests {
         // Insert 6 memories — overflow forces evictions.
         let mut ids = vec![];
         for i in 0..6 {
-            let id = ledger.remember(format!("eviction test memory {i}"), vec![]).await.unwrap();
+            let id = ledger
+                .remember(format!("eviction test memory {i}"), vec![])
+                .await
+                .unwrap();
             ids.push(id);
         }
 
@@ -448,7 +469,10 @@ mod tests {
         .unwrap()
         .unwrap();
 
-        assert!(warm_count > 0, "warm tier should have received evicted entries");
+        assert!(
+            warm_count > 0,
+            "warm tier should have received evicted entries"
+        );
     }
 
     #[tokio::test]
@@ -458,7 +482,10 @@ mod tests {
 
         // Insert enough to overflow hot (cap=4) → warm.
         for i in 0..6 {
-            ledger.remember(format!("project planning meeting agenda {i}"), vec![]).await.unwrap();
+            ledger
+                .remember(format!("project planning meeting agenda {i}"), vec![])
+                .await
+                .unwrap();
         }
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
@@ -475,21 +502,26 @@ mod tests {
     #[tokio::test]
     async fn rrf_fusion_scores_correctly() {
         // Unit test for the RRF helper directly.
-        let keyword = vec![
-            ("id_a".to_string(), -1.0f64),
-            ("id_b".to_string(), -2.0f64),
-        ];
-        let vector = vec![
-            ("id_b".to_string(), 0.05f32),
-            ("id_a".to_string(), 0.10f32),
-        ];
+        let keyword = vec![("id_a".to_string(), -1.0f64), ("id_b".to_string(), -2.0f64)];
+        let vector = vec![("id_b".to_string(), 0.05f32), ("id_a".to_string(), 0.10f32)];
         let fused = reciprocal_rank_fusion(&keyword, &vector, 5);
         // id_a is rank-1 in keyword, rank-2 in vector → score = 1/61 + 1/62
         // id_b is rank-2 in keyword, rank-1 in vector → score = 1/62 + 1/61
         // They should be equal (symmetric fusion); both appear.
         assert_eq!(fused.len(), 2);
-        let score_a = fused.iter().find(|(id, _)| id == "id_a").map(|(_, s)| *s).unwrap_or(0.0);
-        let score_b = fused.iter().find(|(id, _)| id == "id_b").map(|(_, s)| *s).unwrap_or(0.0);
-        assert!((score_a - score_b).abs() < 1e-10, "symmetric inputs → equal RRF scores");
+        let score_a = fused
+            .iter()
+            .find(|(id, _)| id == "id_a")
+            .map(|(_, s)| *s)
+            .unwrap_or(0.0);
+        let score_b = fused
+            .iter()
+            .find(|(id, _)| id == "id_b")
+            .map(|(_, s)| *s)
+            .unwrap_or(0.0);
+        assert!(
+            (score_a - score_b).abs() < 1e-10,
+            "symmetric inputs → equal RRF scores"
+        );
     }
 }

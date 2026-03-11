@@ -40,7 +40,9 @@ async fn main() -> anyhow::Result<()> {
         .map(PathBuf::from)
         .unwrap_or_else(|_| {
             let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-            PathBuf::from(home).join(".gristmill").join("gristmill.sock")
+            PathBuf::from(home)
+                .join(".gristmill")
+                .join("gristmill.sock")
         });
 
     // ── IPC server (background task) ─────────────────────────────────────────

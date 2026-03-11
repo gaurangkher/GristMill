@@ -13,12 +13,12 @@ use std::path::Path;
 use std::sync::Arc;
 
 use arc_swap::ArcSwap;
+#[allow(unused_imports)]
+use metrics;
 #[cfg(feature = "onnx")]
 use ndarray::Array2;
 use serde::{Deserialize, Serialize};
 use tracing::{info, instrument, warn};
-#[allow(unused_imports)]
-use metrics;
 
 use crate::error::SieveError;
 use crate::features::FeatureVector;
@@ -153,7 +153,9 @@ impl Classifier {
         }
     }
 
-    fn load_inner(#[allow(unused_variables)] model_path: Option<&Path>) -> Result<ClassifierInner, SieveError> {
+    fn load_inner(
+        #[allow(unused_variables)] model_path: Option<&Path>,
+    ) -> Result<ClassifierInner, SieveError> {
         #[cfg(feature = "onnx")]
         if let Some(path) = model_path {
             if path.exists() {
@@ -206,17 +208,19 @@ impl Classifier {
 
         let batch: Array2<f32> = features.as_batch();
         let outputs = session
-            .run(inputs!["features" => batch.view()]
-                .map_err(|e| SieveError::Inference(e.to_string()))?)
+            .run(
+                inputs!["features" => batch.view()]
+                    .map_err(|e| SieveError::Inference(e.to_string()))?,
+            )
             .map_err(|e| SieveError::Inference(e.to_string()))?;
 
         let logits = outputs["logits"]
             .try_extract_tensor::<f32>()
             .map_err(|e| SieveError::Inference(e.to_string()))?;
 
-        let logit_slice = logits.as_slice().ok_or_else(|| {
-            SieveError::Inference("failed to get contiguous logit slice".into())
-        })?;
+        let logit_slice = logits
+            .as_slice()
+            .ok_or_else(|| SieveError::Inference("failed to get contiguous logit slice".into()))?;
 
         Ok(ClassifierOutput::from_logits(logit_slice))
     }
@@ -285,14 +289,11 @@ pub fn softmax(logits: &[f32]) -> Vec<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use grist_event::{ChannelType, GristEvent};
     use crate::features::FeatureExtractor;
+    use grist_event::{ChannelType, GristEvent};
 
     fn classify(text: &str) -> ClassifierOutput {
-        let event = GristEvent::new(
-            ChannelType::Http,
-            serde_json::json!({ "text": text }),
-        );
+        let event = GristEvent::new(ChannelType::Http, serde_json::json!({ "text": text }));
         let extractor = FeatureExtractor::new_no_embed();
         let fv = extractor.extract(&event).unwrap();
         let classifier = Classifier::heuristic();

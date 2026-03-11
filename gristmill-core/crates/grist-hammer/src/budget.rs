@@ -122,7 +122,10 @@ impl BudgetManager {
         let mut state = self.state.lock();
         state.maybe_reset();
         let daily_remaining = self.config.daily_tokens.saturating_sub(state.daily_used);
-        let monthly_remaining = self.config.monthly_tokens.saturating_sub(state.monthly_used);
+        let monthly_remaining = self
+            .config
+            .monthly_tokens
+            .saturating_sub(state.monthly_used);
         BudgetInfo {
             daily_used: state.daily_used,
             daily_limit: self.config.daily_tokens,
@@ -151,7 +154,10 @@ mod tests {
     use super::*;
 
     fn make_budget(daily: u64, monthly: u64) -> BudgetManager {
-        BudgetManager::new(BudgetConfig { daily_tokens: daily, monthly_tokens: monthly })
+        BudgetManager::new(BudgetConfig {
+            daily_tokens: daily,
+            monthly_tokens: monthly,
+        })
     }
 
     #[test]

@@ -56,7 +56,10 @@ impl RequestBatcher {
     ) -> Result<EscalationResponse, HammerError> {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.tx
-            .send(BatchMsg { request, reply: reply_tx })
+            .send(BatchMsg {
+                request,
+                reply: reply_tx,
+            })
             .await
             .map_err(|_| HammerError::Config("batcher channel closed".into()))?;
 
@@ -133,33 +136,41 @@ async fn batcher_task(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use crate::config::HammerConfig;
     use crate::router::RequestRouter;
     use crate::types::{EscalationRequest, Provider};
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     struct CountingProvider {
         count: Arc<AtomicUsize>,
     }
 
     impl crate::router::ProviderFn for CountingProvider {
-        fn call(
-            &self,
-            req: &EscalationRequest,
-        ) -> Result<(String, u32, Provider), HammerError> {
+        fn call(&self, req: &EscalationRequest) -> Result<(String, u32, Provider), HammerError> {
             self.count.fetch_add(1, Ordering::SeqCst);
-            Ok((format!("response to: {}", req.prompt), 5, Provider::AnthropicPrimary))
+            Ok((
+                format!("response to: {}", req.prompt),
+                5,
+                Provider::AnthropicPrimary,
+            ))
         }
     }
 
     fn make_router(count: Arc<AtomicUsize>) -> Arc<RequestRouter> {
         let providers: Vec<Arc<dyn crate::router::ProviderFn>> =
             vec![Arc::new(CountingProvider { count })];
-        Arc::new(RequestRouter::with_mock_providers(HammerConfig::default(), providers))
+        Arc::new(RequestRouter::with_mock_providers(
+            HammerConfig::default(),
+            providers,
+        ))
     }
 
     fn batch_config(window_ms: u64, max_batch_size: usize) -> BatchConfig {
-        BatchConfig { enabled: true, window_ms, max_batch_size }
+        BatchConfig {
+            enabled: true,
+            window_ms,
+            max_batch_size,
+        }
     }
 
     #[tokio::test]
@@ -204,13 +215,9 @@ mod tests {
         let batcher = Arc::new(RequestBatcher::new(batch_config(5000, 2), router));
 
         let b1 = Arc::clone(&batcher);
-        let h1 = tokio::spawn(async move {
-            b1.submit(EscalationRequest::new("q1", 50)).await
-        });
+        let h1 = tokio::spawn(async move { b1.submit(EscalationRequest::new("q1", 50)).await });
         let b2 = Arc::clone(&batcher);
-        let h2 = tokio::spawn(async move {
-            b2.submit(EscalationRequest::new("q2", 50)).await
-        });
+        let h2 = tokio::spawn(async move { b2.submit(EscalationRequest::new("q2", 50)).await });
 
         h1.await.unwrap().unwrap();
         h2.await.unwrap().unwrap();

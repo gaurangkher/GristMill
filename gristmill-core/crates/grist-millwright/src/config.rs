@@ -1,7 +1,7 @@
 //! Configuration for the Millwright DAG orchestrator.
 
-use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 /// Top-level config for the Millwright, deserialized from the `millwright:`
 /// section of `~/.gristmill/config.yaml`.

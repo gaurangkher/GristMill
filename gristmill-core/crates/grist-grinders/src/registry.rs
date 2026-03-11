@@ -196,9 +196,7 @@ impl ModelRegistry {
 
         let _guard = entry.load_lock.lock();
         let new_session = load_session(&entry.config)?;
-        entry
-            .session
-            .store(Arc::new(Some(Arc::new(new_session))));
+        entry.session.store(Arc::new(Some(Arc::new(new_session))));
         *entry.state.lock() = ModelState::Warm;
 
         let elapsed_ms = t0.elapsed().as_millis();
@@ -261,15 +259,10 @@ impl Default for ModelRegistry {
 fn load_and_store(entry: &ModelEntry) -> Result<(), GrindersError> {
     let t0 = Instant::now();
     let session = load_session(&entry.config)?;
-    entry
-        .session
-        .store(Arc::new(Some(Arc::new(session))));
+    entry.session.store(Arc::new(Some(Arc::new(session))));
     *entry.state.lock() = ModelState::Warm;
     let elapsed_ms = t0.elapsed().as_millis();
-    debug!(
-        model_id = entry.config.model_id,
-        elapsed_ms, "model loaded"
-    );
+    debug!(model_id = entry.config.model_id, elapsed_ms, "model loaded");
     metrics::counter!("grinders.registry.loads").increment(1);
     Ok(())
 }
@@ -324,7 +317,10 @@ mod tests {
         let r = ModelRegistry::new();
         r.register(dummy_config("test-warm-missing", true)).unwrap();
         let snaps = r.snapshot();
-        let snap = snaps.iter().find(|s| s.model_id == "test-warm-missing").unwrap();
+        let snap = snaps
+            .iter()
+            .find(|s| s.model_id == "test-warm-missing")
+            .unwrap();
         // Without the `onnx` feature the loader returns a Stub → Warm.
         // With the `onnx` feature but missing file → Failed.
         assert!(

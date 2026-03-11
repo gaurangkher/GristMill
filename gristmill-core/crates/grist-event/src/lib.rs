@@ -150,15 +150,27 @@ pub enum ChannelType {
     WebSocket,
     Cli,
     Cron,
-    Webhook { provider: String },
-    MessageQueue { topic: String },
-    FileSystem { path: String },
+    Webhook {
+        provider: String,
+    },
+    MessageQueue {
+        topic: String,
+    },
+    FileSystem {
+        path: String,
+    },
     /// Event originating from the Python shell via PyO3.
-    Python { callback_id: String },
+    Python {
+        callback_id: String,
+    },
     /// Event originating from the TypeScript shell via napi-rs.
-    TypeScript { adapter_id: String },
+    TypeScript {
+        adapter_id: String,
+    },
     /// Internal system event (bus, compactor, etc.).
-    Internal { subsystem: String },
+    Internal {
+        subsystem: String,
+    },
 }
 
 impl ChannelType {
@@ -334,10 +346,7 @@ mod tests {
         let restored = GristEvent::from_json_bytes(&bytes).unwrap();
         assert_eq!(e.id, restored.id);
         assert_eq!(e.metadata.priority, restored.metadata.priority);
-        assert_eq!(
-            e.metadata.correlation_id,
-            restored.metadata.correlation_id
-        );
+        assert_eq!(e.metadata.correlation_id, restored.metadata.correlation_id);
     }
 
     #[test]

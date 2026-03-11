@@ -150,7 +150,10 @@ mod tests {
         let e = StubEmbedder::new(384);
         let v = e.embed("test text for normalization").unwrap();
         let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
-        assert!((norm - 1.0).abs() < 1e-4, "embedding should be L2-normalised, norm={norm}");
+        assert!(
+            (norm - 1.0).abs() < 1e-4,
+            "embedding should be L2-normalised, norm={norm}"
+        );
     }
 
     #[test]

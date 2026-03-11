@@ -12,9 +12,9 @@
 //! `Vec<Box<dyn ProviderFn>>` that replaces the real HTTP dispatch so no live
 //! network calls are made.
 
-use std::time::Instant;
 #[cfg(test)]
 use std::sync::Arc;
+use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 use tracing::warn;
@@ -32,10 +32,7 @@ use crate::types::{EscalationRequest, EscalationResponse, Provider};
 /// In production the router builds concrete closures that call Anthropic/Ollama
 /// over HTTP.  In tests, mock implementations are injected instead.
 pub trait ProviderFn: Send + Sync {
-    fn call(
-        &self,
-        req: &EscalationRequest,
-    ) -> Result<(String, u32, Provider), HammerError>;
+    fn call(&self, req: &EscalationRequest) -> Result<(String, u32, Provider), HammerError>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -119,10 +116,7 @@ impl RequestRouter {
 
     /// Create a router with injected mock providers for unit tests.
     #[cfg(test)]
-    pub fn with_mock_providers(
-        config: HammerConfig,
-        providers: Vec<Arc<dyn ProviderFn>>,
-    ) -> Self {
+    pub fn with_mock_providers(config: HammerConfig, providers: Vec<Arc<dyn ProviderFn>>) -> Self {
         let http = reqwest::Client::new();
         Self {
             config,
@@ -132,10 +126,7 @@ impl RequestRouter {
     }
 
     /// Route the request to the first available provider.
-    pub async fn route(
-        &self,
-        req: &EscalationRequest,
-    ) -> Result<EscalationResponse, HammerError> {
+    pub async fn route(&self, req: &EscalationRequest) -> Result<EscalationResponse, HammerError> {
         let start = Instant::now();
 
         // ── Test path: use injected mock providers ───────────────────────
@@ -170,8 +161,13 @@ impl RequestRouter {
             .unwrap_or(&self.config.providers.anthropic.default_model);
 
         // Try Anthropic primary.
-        match self.call_anthropic(req, model, Provider::AnthropicPrimary).await {
-            Ok(resp) => return Ok(self.make_response(req, resp, Provider::AnthropicPrimary, start)),
+        match self
+            .call_anthropic(req, model, Provider::AnthropicPrimary)
+            .await
+        {
+            Ok(resp) => {
+                return Ok(self.make_response(req, resp, Provider::AnthropicPrimary, start))
+            }
             Err(e) => {
                 warn!(provider = "anthropic_primary", error = %e, "provider failed, trying fallback");
             }
@@ -179,8 +175,13 @@ impl RequestRouter {
 
         // Try Anthropic fallback model.
         let fallback = &self.config.providers.anthropic.fallback_model.clone();
-        match self.call_anthropic(req, fallback, Provider::AnthropicFallback).await {
-            Ok(resp) => return Ok(self.make_response(req, resp, Provider::AnthropicFallback, start)),
+        match self
+            .call_anthropic(req, fallback, Provider::AnthropicFallback)
+            .await
+        {
+            Ok(resp) => {
+                return Ok(self.make_response(req, resp, Provider::AnthropicFallback, start))
+            }
             Err(e) => {
                 warn!(provider = "anthropic_fallback", error = %e, "provider failed, trying Ollama");
             }
@@ -207,7 +208,10 @@ impl RequestRouter {
         let body = AnthropicRequest {
             model,
             max_tokens: req.max_tokens,
-            messages: vec![AnthropicMessage { role: "user", content: &req.prompt }],
+            messages: vec![AnthropicMessage {
+                role: "user",
+                content: &req.prompt,
+            }],
             system: req.system.as_deref(),
         };
 
@@ -232,20 +236,21 @@ impl RequestRouter {
             });
         }
 
-        let parsed: AnthropicResponse =
-            resp.json().await.map_err(|e| HammerError::Http(e))?;
+        let parsed: AnthropicResponse = resp.json().await.map_err(|e| HammerError::Http(e))?;
 
-        let content = parsed.content.into_iter().map(|c| c.text).collect::<Vec<_>>().join("");
+        let content = parsed
+            .content
+            .into_iter()
+            .map(|c| c.text)
+            .collect::<Vec<_>>()
+            .join("");
         let tokens = parsed.usage.input_tokens + parsed.usage.output_tokens;
         Ok((content, tokens))
     }
 
     // ── Ollama HTTP call ──────────────────────────────────────────────────
 
-    async fn call_ollama(
-        &self,
-        req: &EscalationRequest,
-    ) -> Result<(String, u32), HammerError> {
+    async fn call_ollama(&self, req: &EscalationRequest) -> Result<(String, u32), HammerError> {
         let model = &self.config.providers.ollama.model;
         let body = OllamaRequest {
             model,
@@ -271,11 +276,9 @@ impl RequestRouter {
             });
         }
 
-        let parsed: OllamaResponse =
-            resp.json().await.map_err(|e| HammerError::Http(e))?;
+        let parsed: OllamaResponse = resp.json().await.map_err(|e| HammerError::Http(e))?;
 
-        let tokens =
-            parsed.eval_count.unwrap_or(0) + parsed.prompt_eval_count.unwrap_or(0);
+        let tokens = parsed.eval_count.unwrap_or(0) + parsed.prompt_eval_count.unwrap_or(0);
         Ok((parsed.response, tokens))
     }
 
@@ -383,8 +386,11 @@ mod tests {
 
     #[tokio::test]
     async fn provider_all_fail_returns_error() {
-        let providers: Vec<Arc<dyn ProviderFn>> =
-            vec![Arc::new(FailProvider), Arc::new(FailProvider), Arc::new(FailProvider)];
+        let providers: Vec<Arc<dyn ProviderFn>> = vec![
+            Arc::new(FailProvider),
+            Arc::new(FailProvider),
+            Arc::new(FailProvider),
+        ];
         let router = RequestRouter::with_mock_providers(HammerConfig::default(), providers);
         let err = router.route(&make_request()).await.unwrap_err();
         assert!(matches!(err, HammerError::AllProvidersFailed(_)));

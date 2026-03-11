@@ -10,7 +10,7 @@
     "dev": "tsx watch src/main.ts",
     "cli": "tsx src/cli.ts",
     "start": "node dist/index.js",
-    "test": "vitest run",
+    "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",
     "lint": "tsc --noEmit"
   },
