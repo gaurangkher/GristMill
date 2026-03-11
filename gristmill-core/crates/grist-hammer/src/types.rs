@@ -52,11 +52,11 @@ impl EscalationRequest {
 
     /// Conservative token estimate (prompt chars ÷ 4, rounded up).
     pub fn estimated_tokens(&self) -> u32 {
-        let prompt_tokens = (self.prompt.len() as u32 + 3) / 4;
+        let prompt_tokens = (self.prompt.len() as u32).div_ceil(4);
         let system_tokens = self
             .system
             .as_deref()
-            .map(|s| (s.len() as u32 + 3) / 4)
+            .map(|s| (s.len() as u32).div_ceil(4))
             .unwrap_or(0);
         prompt_tokens + system_tokens + self.max_tokens
     }

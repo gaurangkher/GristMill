@@ -55,8 +55,6 @@ pub use error::SieveError;
 pub use features::FeatureExtractor;
 
 use grist_event::GristEvent;
-#[allow(unused_imports)]
-use metrics;
 use tracing::{debug, info, instrument, warn};
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -301,8 +299,10 @@ mod tests {
     // Must be async because Sieve::new() spawns a Tokio task for the feedback log.
     #[tokio::test]
     async fn custom_threshold_is_stored() {
-        let mut config = SieveConfig::default();
-        config.confidence_threshold = 0.70;
+        let config = SieveConfig {
+            confidence_threshold: 0.70,
+            ..SieveConfig::default()
+        };
         let sieve = Sieve::new(config).unwrap();
         assert!((sieve.confidence_threshold() - 0.70).abs() < 1e-5);
     }

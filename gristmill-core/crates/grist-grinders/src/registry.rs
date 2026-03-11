@@ -49,7 +49,7 @@ pub enum ModelState {
 /// `session` is `ArcSwap<Option<Arc<GrindersSession>>>`:
 /// - `None`  → not yet loaded (cold).
 /// - `Some`  → loaded; the inner `Arc` is returned to callers so they can
-///             hold onto it while a concurrent hot-reload swaps in a new one.
+///   hold onto it while a concurrent hot-reload swaps in a new one.
 pub(crate) struct ModelEntry {
     pub config: ModelConfig,
     /// Live session — atomically swappable via ArcSwap (hot-reload, G-06).
@@ -173,7 +173,7 @@ impl ModelRegistry {
         guard
             .as_ref()
             .as_ref()
-            .map(|s| Arc::clone(s))
+            .map(Arc::clone)
             .ok_or_else(|| GrindersError::ModelLoadFailed {
                 model_id: model_id.to_owned(),
                 reason: "session is None immediately after load (bug)".into(),

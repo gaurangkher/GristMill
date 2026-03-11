@@ -219,7 +219,7 @@ mod tests {
             let d = p.delay(0).as_millis();
             // ±20% of 1000 → [600, 1400]
             assert!(
-                d >= 600 && d <= 1_400,
+                (600..=1_400).contains(&d),
                 "jitter delay {d} out of expected range"
             );
         }

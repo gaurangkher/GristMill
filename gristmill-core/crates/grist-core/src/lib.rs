@@ -464,11 +464,13 @@ mod tests {
     #[test]
     fn config_wiring_sieve_maps_confidence_threshold() {
         use grist_config::{GristMillConfig, SieveConfig as CfgSieve};
-        let mut cfg = GristMillConfig::default();
-        cfg.sieve = CfgSieve {
-            confidence_threshold: 0.70,
-            cache_size: 500,
-            ..CfgSieve::default()
+        let cfg = GristMillConfig {
+            sieve: CfgSieve {
+                confidence_threshold: 0.70,
+                cache_size: 500,
+                ..CfgSieve::default()
+            },
+            ..GristMillConfig::default()
         };
         let sc = build_sieve_config(&cfg);
         assert!((sc.confidence_threshold - 0.70).abs() < 1e-6);

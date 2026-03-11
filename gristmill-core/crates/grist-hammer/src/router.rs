@@ -189,10 +189,10 @@ impl RequestRouter {
 
         // Try Ollama.
         match self.call_ollama(req).await {
-            Ok(resp) => return Ok(self.make_response(req, resp, Provider::Ollama, start)),
+            Ok(resp) => Ok(self.make_response(req, resp, Provider::Ollama, start)),
             Err(e) => {
                 warn!(provider = "ollama", error = %e, "all providers failed");
-                return Err(HammerError::AllProvidersFailed(e.to_string()));
+                Err(HammerError::AllProvidersFailed(e.to_string()))
             }
         }
     }
@@ -225,7 +225,7 @@ impl RequestRouter {
             .json(&body)
             .send()
             .await
-            .map_err(|e| HammerError::Http(e))?;
+            .map_err(HammerError::Http)?;
 
         if !resp.status().is_success() {
             let status = resp.status();
@@ -236,7 +236,7 @@ impl RequestRouter {
             });
         }
 
-        let parsed: AnthropicResponse = resp.json().await.map_err(|e| HammerError::Http(e))?;
+        let parsed: AnthropicResponse = resp.json().await.map_err(HammerError::Http)?;
 
         let content = parsed
             .content
@@ -265,7 +265,7 @@ impl RequestRouter {
             .json(&body)
             .send()
             .await
-            .map_err(|e| HammerError::Http(e))?;
+            .map_err(HammerError::Http)?;
 
         if !resp.status().is_success() {
             let status = resp.status();
@@ -276,7 +276,7 @@ impl RequestRouter {
             });
         }
 
-        let parsed: OllamaResponse = resp.json().await.map_err(|e| HammerError::Http(e))?;
+        let parsed: OllamaResponse = resp.json().await.map_err(HammerError::Http)?;
 
         let tokens = parsed.eval_count.unwrap_or(0) + parsed.prompt_eval_count.unwrap_or(0);
         Ok((parsed.response, tokens))

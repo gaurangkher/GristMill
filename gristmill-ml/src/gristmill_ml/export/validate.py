@@ -14,7 +14,7 @@ import argparse
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -72,9 +72,7 @@ def validate_classifier_parity(
     # ── PyTorch inference ─────────────────────────────────────────────────────
     pytorch_model.eval()
     with torch.no_grad():
-        pt_logits: np.ndarray = (
-            pytorch_model(torch.from_numpy(test_features)).numpy()
-        )
+        pt_logits: np.ndarray = pytorch_model(torch.from_numpy(test_features)).numpy()
 
     # ── ONNX Runtime inference ────────────────────────────────────────────────
     sess_options = ort.SessionOptions()
@@ -86,7 +84,7 @@ def validate_classifier_parity(
     ort_logits: np.ndarray = ort_outputs[0]
 
     # ── Numeric comparison ────────────────────────────────────────────────────
-    diff = np.abs(pt_logits - ort_logits[:, :pt_logits.shape[1]])
+    diff = np.abs(pt_logits - ort_logits[:, : pt_logits.shape[1]])
     max_diff = float(diff.max())
     mean_diff = float(diff.mean())
 
@@ -128,14 +126,12 @@ def validate_rust_parity(
         :class:`ValidationResult`.
     """
     try:
-        from gristmill_ml.core import PyGristMill, PyGristEvent, HAS_NATIVE
+        from gristmill_ml.core import PyGristMill, HAS_NATIVE
     except ImportError:
         HAS_NATIVE = False
 
     if not HAS_NATIVE:
-        logger.warning(
-            "gristmill_core not available — skipping Rust parity check"
-        )
+        logger.warning("gristmill_core not available — skipping Rust parity check")
         return ValidationResult(
             passed=True,
             max_diff=0.0,
@@ -157,9 +153,7 @@ def validate_rust_parity(
     label_to_name = {v: k for k, v in ROUTE_LABEL_MAP.items()}
 
     # Build ONNX session
-    session = ort.InferenceSession(
-        str(onnx_path), providers=["CPUExecutionProvider"]
-    )
+    session = ort.InferenceSession(str(onnx_path), providers=["CPUExecutionProvider"])
 
     # Feature extractor
     embedder = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
@@ -171,8 +165,11 @@ def validate_rust_parity(
     except Exception as exc:
         logger.warning("Could not init PyGristMill: %s — skipping Rust parity", exc)
         return ValidationResult(
-            passed=True, max_diff=0.0, mean_diff=0.0, n_samples=0,
-            notes=f"PyGristMill init failed: {exc}"
+            passed=True,
+            max_diff=0.0,
+            mean_diff=0.0,
+            n_samples=0,
+            notes=f"PyGristMill init failed: {exc}",
         )
 
     records = generate_synthetic_records(feedback_samples)
@@ -194,13 +191,19 @@ def validate_rust_parity(
 
         # Rust prediction
         import json
-        event_json = json.dumps({
-            "source": {"type": source},
-            "payload": {"text": text},
-            "timestamp_ms": rec.timestamp_ms,
-            "id": rec.event_id,
-            "metadata": {"priority": ["low", "normal", "high", "critical"][min(priority, 3)], "tags": {}},
-        })
+
+        event_json = json.dumps(
+            {
+                "source": {"type": source},
+                "payload": {"text": text},
+                "timestamp_ms": rec.timestamp_ms,
+                "id": rec.event_id,
+                "metadata": {
+                    "priority": ["low", "normal", "high", "critical"][min(priority, 3)],
+                    "tags": {},
+                },
+            }
+        )
         try:
             decision_json = mill.triage(event_json)
             decision = json.loads(decision_json)
@@ -231,6 +234,7 @@ def validate_rust_parity(
 
 
 # ── CLI entry-point ───────────────────────────────────────────────────────────
+
 
 def main() -> None:  # pragma: no cover
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")

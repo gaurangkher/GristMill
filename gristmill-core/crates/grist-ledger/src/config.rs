@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 // LedgerConfig (top-level)
 // ─────────────────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct LedgerConfig {
     #[serde(default)]
     pub hot: HotConfig,
@@ -18,17 +18,6 @@ pub struct LedgerConfig {
     pub cold: ColdConfig,
     #[serde(default)]
     pub compactor: CompactorConfig,
-}
-
-impl Default for LedgerConfig {
-    fn default() -> Self {
-        Self {
-            hot: HotConfig::default(),
-            warm: WarmConfig::default(),
-            cold: ColdConfig::default(),
-            compactor: CompactorConfig::default(),
-        }
-    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

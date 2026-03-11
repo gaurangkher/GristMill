@@ -25,8 +25,6 @@ from __future__ import annotations
 import argparse
 import logging
 import math
-import re
-import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
@@ -35,7 +33,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from sentence_transformers import SentenceTransformer
-from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.metrics import classification_report
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader, WeightedRandomSampler
@@ -54,16 +52,44 @@ NUM_CLASSES: int = 4
 
 _CODE_INDICATORS: frozenset[str] = frozenset(
     [
-        "def ", "fn ", "func ", "function ", "class ", "import ", "from ",
-        "let ", "const ", "var ", "return ", "if ", "else ", "for ", "while ",
-        "{", "}", "()", "=>", "->", "::", "//", "/*", "#!", "```",
-        ".rs", ".py", ".ts", ".js", ".go", ".cpp",
+        "def ",
+        "fn ",
+        "func ",
+        "function ",
+        "class ",
+        "import ",
+        "from ",
+        "let ",
+        "const ",
+        "var ",
+        "return ",
+        "if ",
+        "else ",
+        "for ",
+        "while ",
+        "{",
+        "}",
+        "()",
+        "=>",
+        "->",
+        "::",
+        "//",
+        "/*",
+        "#!",
+        "```",
+        ".rs",
+        ".py",
+        ".ts",
+        ".js",
+        ".go",
+        ".cpp",
     ]
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SieveClassifierHead
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class SieveClassifierHead(nn.Module):
     """Lightweight 2-layer MLP on top of pre-computed MiniLM embeddings.
@@ -96,6 +122,7 @@ class SieveClassifierHead(nn.Module):
 # FeatureExtractor
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class FeatureExtractor:
     """Pure-Python mirror of ``grist_sieve/features.rs``.
 
@@ -114,6 +141,7 @@ class FeatureExtractor:
         # Try to load spacy for entity density (optional)
         try:
             import spacy  # noqa: F401
+
             self._nlp = spacy.load("en_core_web_sm", disable=["parser", "tagger"])
         except Exception:
             self._nlp = None
@@ -173,6 +201,7 @@ class FeatureExtractor:
         # [391] ambiguity score
         if tokens:
             from collections import Counter
+
             max_freq = Counter(tokens).most_common(1)[0][1]
             ambiguity = 1.0 - max_freq / len(tokens)
         else:
@@ -231,6 +260,7 @@ class FeatureExtractor:
 
             if tokens:
                 from collections import Counter
+
                 max_freq = Counter(tokens).most_common(1)[0][1]
                 ambiguity = 1.0 - max_freq / len(tokens)
             else:
@@ -248,6 +278,7 @@ class FeatureExtractor:
 # ─────────────────────────────────────────────────────────────────────────────
 # TrainResult
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 @dataclass
 class TrainResult:
@@ -269,6 +300,7 @@ class TrainResult:
 # ─────────────────────────────────────────────────────────────────────────────
 # SieveTrainer
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class SieveTrainer:
     """Full training pipeline for the Sieve intent classifier.
@@ -364,9 +396,7 @@ class SieveTrainer:
         train_ds = FeedbackDataset(self.feedback_dir, split="train")
         val_ds = FeedbackDataset(self.feedback_dir, split="val")
 
-        logger.info(
-            "Dataset — train: %d, val: %d", len(train_ds), len(val_ds)
-        )
+        logger.info("Dataset — train: %d, val: %d", len(train_ds), len(val_ds))
         logger.info("Class distribution (train): %s", train_ds.class_counts())
 
         if self.augment and len(train_ds) > 0:
@@ -411,11 +441,17 @@ class SieveTrainer:
         no_improve = 0
 
         with tracker.start_run(f"sieve-{epochs}ep"):
-            tracker.log_params({
-                "epochs": epochs, "batch_size": batch_size, "lr": lr,
-                "weight_decay": weight_decay, "augment": self.augment,
-                "train_size": len(train_ds), "val_size": len(val_ds),
-            })
+            tracker.log_params(
+                {
+                    "epochs": epochs,
+                    "batch_size": batch_size,
+                    "lr": lr,
+                    "weight_decay": weight_decay,
+                    "augment": self.augment,
+                    "train_size": len(train_ds),
+                    "val_size": len(val_ds),
+                }
+            )
 
             for epoch in range(epochs):
                 # Train
@@ -444,7 +480,10 @@ class SieveTrainer:
                 )
                 logger.info(
                     "Epoch %2d/%d — loss=%.4f  val_acc=%.4f",
-                    epoch + 1, epochs, train_loss, val_acc,
+                    epoch + 1,
+                    epochs,
+                    train_loss,
+                    val_acc,
                 )
 
                 if val_acc > result.best_val_accuracy:
@@ -519,17 +558,13 @@ class SieveTrainer:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         dest = output_path or (self.output_dir / "intent-classifier-v1.onnx")
 
-        onnx_path = OnnxExporter.export_classifier(
-            self.model, dest, quantize=quantize
-        )
+        onnx_path = OnnxExporter.export_classifier(self.model, dest, quantize=quantize)
 
         # Quick parity check on synthetic data
         dummy = np.random.randn(16, FEATURE_DIM).astype(np.float32)
         result = validate_classifier_parity(self.model, onnx_path, dummy)
         if not result["passed"]:
-            raise AssertionError(
-                f"ONNX parity check failed: max_diff={result['max_diff']:.6f}"
-            )
+            raise AssertionError(f"ONNX parity check failed: max_diff={result['max_diff']:.6f}")
         logger.info("ONNX parity OK — max_diff=%.8f", result["max_diff"])
         return onnx_path
 
@@ -553,13 +588,14 @@ class SieveTrainer:
 
 # ── CLI entry-point ───────────────────────────────────────────────────────────
 
+
 def main() -> None:  # pragma: no cover
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
     parser = argparse.ArgumentParser(description="Train the GristMill Sieve classifier")
-    parser.add_argument("--feedback-dir", type=Path,
-                        default=Path("~/.gristmill/feedback").expanduser())
-    parser.add_argument("--output-dir", type=Path,
-                        default=Path("~/.gristmill/models").expanduser())
+    parser.add_argument(
+        "--feedback-dir", type=Path, default=Path("~/.gristmill/feedback").expanduser()
+    )
+    parser.add_argument("--output-dir", type=Path, default=Path("~/.gristmill/models").expanduser())
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--no-quantize", action="store_true")
     args = parser.parse_args()

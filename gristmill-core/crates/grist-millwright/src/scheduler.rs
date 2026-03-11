@@ -885,8 +885,10 @@ mod tests {
         // Use a step with `requires_approval` — it will await a Channel gate
         // that is never resolved.  The 50ms pipeline-level timeout fires first
         // (GateEvaluator default is 30 s, so the pipeline timeout wins).
-        let mut config = MillwrightConfig::default();
-        config.default_timeout_ms = 50; // 50ms pipeline timeout
+        let config = MillwrightConfig {
+            default_timeout_ms: 50, // 50ms pipeline timeout
+            ..MillwrightConfig::default()
+        };
         let s = DagScheduler::new_noop(config);
 
         let blocking_step = Step::new(

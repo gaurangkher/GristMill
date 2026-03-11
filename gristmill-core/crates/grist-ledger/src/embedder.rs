@@ -97,7 +97,7 @@ impl Embedder for ZeroEmbedder {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// L2-normalise a vector in place.  No-op if the norm is negligible.
-pub fn l2_normalize(v: &mut Vec<f32>) {
+pub fn l2_normalize(v: &mut [f32]) {
     let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
     if norm > 1e-8 {
         for x in v.iter_mut() {

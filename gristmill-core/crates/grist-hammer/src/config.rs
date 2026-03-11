@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 // Top-level HammerConfig
 // ─────────────────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct HammerConfig {
     #[serde(default)]
     pub providers: ProvidersConfig,
@@ -18,36 +18,16 @@ pub struct HammerConfig {
     pub batch: BatchConfig,
 }
 
-impl Default for HammerConfig {
-    fn default() -> Self {
-        Self {
-            providers: ProvidersConfig::default(),
-            budget: BudgetConfig::default(),
-            cache: CacheConfig::default(),
-            batch: BatchConfig::default(),
-        }
-    }
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // ProvidersConfig
 // ─────────────────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ProvidersConfig {
     #[serde(default)]
     pub anthropic: AnthropicConfig,
     #[serde(default)]
     pub ollama: OllamaConfig,
-}
-
-impl Default for ProvidersConfig {
-    fn default() -> Self {
-        Self {
-            anthropic: AnthropicConfig::default(),
-            ollama: OllamaConfig::default(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

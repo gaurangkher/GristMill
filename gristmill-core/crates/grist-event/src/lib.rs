@@ -379,6 +379,6 @@ mod tests {
             serde_json::json!({ "text": "hello world" }), // ~3 tokens
         );
         let count = e.estimated_token_count();
-        assert!(count >= 2 && count <= 6, "count was {count}");
+        assert!((2..=6).contains(&count), "count was {count}");
     }
 }

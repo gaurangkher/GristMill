@@ -39,6 +39,7 @@ class ExperimentTracker:
 
         try:
             import mlflow  # type: ignore[import]
+
             self._mlflow = mlflow
             mlflow.set_tracking_uri(tracking_uri)
             mlflow.set_experiment(experiment_name)
@@ -83,15 +84,11 @@ class ExperimentTracker:
         if self._mlflow is None:
             return
         try:
-            self._mlflow.log_params(
-                {k: str(v) for k, v in params.items()}
-            )
+            self._mlflow.log_params({k: str(v) for k, v in params.items()})
         except Exception as exc:
             logger.debug("mlflow.log_params failed: %s", exc)
 
-    def log_metrics(
-        self, metrics: dict[str, float], step: Optional[int] = None
-    ) -> None:
+    def log_metrics(self, metrics: dict[str, float], step: Optional[int] = None) -> None:
         """Log a dictionary of scalar metrics."""
         if self._mlflow is None:
             return
@@ -113,6 +110,7 @@ class ExperimentTracker:
             return
         try:
             import mlflow.pytorch  # type: ignore[import]
+
             mlflow.pytorch.log_model(model, artifact_path)
         except Exception as exc:
             logger.debug("mlflow.pytorch.log_model failed: %s", exc)

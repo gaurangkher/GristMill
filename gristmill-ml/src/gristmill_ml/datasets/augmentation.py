@@ -7,7 +7,6 @@ server needed) so the training loop works fully offline.
 from __future__ import annotations
 
 import random
-import re
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -41,9 +40,7 @@ def synonym_replace(text: str, n: int = 1) -> str:
     augmented text remains semantically valid.
     """
     words = text.split()
-    replaceable = [
-        (i, w) for i, w in enumerate(words) if w.lower() in _SYNONYMS
-    ]
+    replaceable = [(i, w) for i, w in enumerate(words) if w.lower() in _SYNONYMS]
     if not replaceable:
         return text
 
@@ -109,6 +106,7 @@ def add_typo(text: str) -> str:
 
 # ── Dataset-level augmentation ────────────────────────────────────────────────
 
+
 def augment_record(
     record: "FeedbackRecord",
     factor: int = 3,
@@ -140,9 +138,9 @@ def augment_record(
         raw = {
             "event_id": f"{record.event_id}-aug{i}",
             "timestamp_ms": record.timestamp_ms + i,
-            "route_decision": list(
-                {0: "LOCAL_ML", 1: "RULES", 2: "HYBRID", 3: "LLM_NEEDED"}
-            )[record.label],
+            "route_decision": list({0: "LOCAL_ML", 1: "RULES", 2: "HYBRID", 3: "LLM_NEEDED"})[
+                record.label
+            ],
             "confidence": record.confidence,
             "estimated_tokens": record.estimated_tokens,
             "actual_tokens": record.actual_tokens,

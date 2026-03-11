@@ -68,6 +68,9 @@ pub enum GateType {
 // GateEvaluator
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// A named predicate closure used to evaluate auto-gates.
+type Predicate = Box<dyn Fn(&Value) -> bool + Send + Sync>;
+
 /// Evaluates gate conditions for the scheduler.
 ///
 /// The evaluator holds:
@@ -76,7 +79,7 @@ pub enum GateType {
 ///
 /// It is `Send + Sync` and wrapped in `Arc` so the scheduler can share it.
 pub struct GateEvaluator {
-    predicates: HashMap<String, Box<dyn Fn(&Value) -> bool + Send + Sync>>,
+    predicates: HashMap<String, Predicate>,
     /// Pending channel approvals: step_id → reply sender.
     pending: Mutex<HashMap<String, oneshot::Sender<GateDecision>>>,
     /// Default timeout for channel-based gates.
@@ -94,8 +97,7 @@ impl std::fmt::Debug for GateEvaluator {
 impl GateEvaluator {
     /// Create a new evaluator with built-in predicates and a default timeout.
     pub fn new(default_timeout: Duration) -> Self {
-        let mut predicates: HashMap<String, Box<dyn Fn(&Value) -> bool + Send + Sync>> =
-            HashMap::new();
+        let mut predicates: HashMap<String, Predicate> = HashMap::new();
 
         // ── Built-in predicates ──────────────────────────────────────────────
 
