@@ -66,7 +66,7 @@ class NerTrainer:
         ``{"tokens": [...], "ner_tags": [0, 1, 0, ...]}``.
         """
         try:
-            import torch
+            import torch  # noqa: F401
             from datasets import load_dataset
             from transformers import (
                 AutoModelForTokenClassification,
@@ -77,7 +77,9 @@ class NerTrainer:
             )
             import evaluate
         except ImportError as exc:
-            raise ImportError("Install transformers, datasets, and evaluate: pip install -e .[dev]") from exc
+            raise ImportError(
+                "Install transformers, datasets, and evaluate: pip install -e .[dev]"
+            ) from exc
 
         from gristmill_ml.experiments.tracking import ExperimentTracker
 
@@ -126,14 +128,10 @@ class NerTrainer:
 
         def compute_metrics(p: Any) -> dict[str, float]:
             predictions, labels = p
-            import numpy as np
             pred_ids = predictions.argmax(axis=-1)
-            true_labels = [
-                [label_list[l] for l in label if l != -100]
-                for label in labels
-            ]
+            true_labels = [[label_list[lbl] for lbl in label if lbl != -100] for label in labels]
             true_preds = [
-                [label_list[p] for p, l in zip(pred, label) if l != -100]
+                [label_list[p] for p, lbl in zip(pred, label) if lbl != -100]
                 for pred, label in zip(pred_ids, labels)
             ]
             metrics = seqeval.compute(predictions=true_preds, references=true_labels)
@@ -185,6 +183,7 @@ class NerTrainer:
     def export(self, output_path: Optional[Path] = None) -> Path:
         """Export the fine-tuned model to ONNX and return the path."""
         from gristmill_ml.export.onnx_export import OnnxExporter
+
         dest = output_path or (self.output_dir / "ner-multilingual-v1.onnx")
         return OnnxExporter.export_ner(
             getattr(self, "_model", None),

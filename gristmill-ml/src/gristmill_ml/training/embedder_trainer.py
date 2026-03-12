@@ -106,12 +106,14 @@ class EmbedderTrainer:
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         with tracker.start_run(f"embedder-{epochs}ep"):
-            tracker.log_params({
-                "epochs": epochs,
-                "batch_size": batch_size,
-                "warmup_steps": warmup_steps,
-                "n_pairs": len(examples),
-            })
+            tracker.log_params(
+                {
+                    "epochs": epochs,
+                    "batch_size": batch_size,
+                    "warmup_steps": warmup_steps,
+                    "n_pairs": len(examples),
+                }
+            )
             model.fit(
                 train_objectives=[(train_loader, loss_fn)],
                 epochs=epochs,

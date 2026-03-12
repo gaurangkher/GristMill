@@ -246,7 +246,7 @@ mod tests {
                 queue_depth: 64,
                 batch_window: Duration::from_millis(5),
                 max_batch_size: 8,
-                },
+            },
             Arc::clone(&registry),
         );
         (pool, registry)
@@ -312,15 +312,22 @@ mod tests {
         let mut pool_full_seen = false;
         for _ in 0..20 {
             let req = InferenceRequest::from_features("x", Array2::zeros((1, 1)));
-            if pool.sender.try_send(DispatchMsg {
-                request: req,
-                reply: tokio::sync::oneshot::channel().0,
-                deadline: Instant::now() + Duration::from_secs(1),
-            }).is_err() {
+            if pool
+                .sender
+                .try_send(DispatchMsg {
+                    request: req,
+                    reply: tokio::sync::oneshot::channel().0,
+                    deadline: Instant::now() + Duration::from_secs(1),
+                })
+                .is_err()
+            {
                 pool_full_seen = true;
                 break;
             }
         }
-        assert!(pool_full_seen, "expected pool full error after queue saturation");
+        assert!(
+            pool_full_seen,
+            "expected pool full error after queue saturation"
+        );
     }
 }

@@ -7,7 +7,10 @@ use thiserror::Error;
 pub enum MillwrightError {
     /// The pipeline definition contains a cycle.
     #[error("pipeline '{pipeline_id}' has a dependency cycle involving step '{step_id}'")]
-    CyclicDependency { pipeline_id: String, step_id: String },
+    CyclicDependency {
+        pipeline_id: String,
+        step_id: String,
+    },
 
     /// A step's `depends_on` references a step that does not exist.
     #[error("step '{step_id}' in pipeline '{pipeline_id}' depends on unknown step '{dep_id}'")]

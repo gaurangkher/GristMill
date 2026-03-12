@@ -186,19 +186,15 @@ fn estimate_entity_count(tokens: &[&str]) -> usize {
     tokens
         .iter()
         .enumerate()
-        .filter(|(i, t)| {
-            *i > 0
-                && t.chars()
-                    .next()
-                    .map(|c| c.is_uppercase())
-                    .unwrap_or(false)
-        })
+        .filter(|(i, t)| *i > 0 && t.chars().next().map(|c| c.is_uppercase()).unwrap_or(false))
         .count()
 }
 
 /// Returns a score ∈ [0, 1] indicating how likely this is a question.
 fn question_probability(tokens: &[&str]) -> f32 {
-    let interrogatives = ["who", "what", "when", "where", "why", "how", "which", "whom"];
+    let interrogatives = [
+        "who", "what", "when", "where", "why", "how", "which", "whom",
+    ];
     let has_question_mark = tokens.last().map(|t| t.ends_with('?')).unwrap_or(false);
     let has_interrogative = tokens
         .iter()
@@ -214,8 +210,8 @@ fn question_probability(tokens: &[&str]) -> f32 {
 /// Returns a score ∈ [0, 1] indicating how likely the text contains code.
 fn code_probability(tokens: &[&str]) -> f32 {
     let code_indicators = [
-        "fn ", "def ", "class ", "import ", "return ", "if ", "else", "for ", "while ",
-        "{", "}", "()", "=>", "->", "//", "/*", "```", "#!", "#!/",
+        "fn ", "def ", "class ", "import ", "return ", "if ", "else", "for ", "while ", "{", "}",
+        "()", "=>", "->", "//", "/*", "```", "#!", "#!/",
     ];
     let raw = tokens.join(" ");
     let hits = code_indicators
@@ -302,10 +298,7 @@ mod tests {
     use grist_event::{ChannelType, GristEvent};
 
     fn make_event(text: &str) -> GristEvent {
-        GristEvent::new(
-            ChannelType::Http,
-            serde_json::json!({ "text": text }),
-        )
+        GristEvent::new(ChannelType::Http, serde_json::json!({ "text": text }))
     }
 
     #[test]
@@ -322,7 +315,11 @@ mod tests {
         let event = make_event("test");
         let fv = extractor.extract(&event).unwrap();
         // First EMBEDDING_DIM elements should all be 0.
-        assert!(fv.data.slice(ndarray::s![0..EMBEDDING_DIM]).iter().all(|&x| x == 0.0));
+        assert!(fv
+            .data
+            .slice(ndarray::s![0..EMBEDDING_DIM])
+            .iter()
+            .all(|&x| x == 0.0));
     }
 
     #[test]
@@ -331,7 +328,10 @@ mod tests {
         let event = make_event("What is the capital of France?");
         let fv = extractor.extract(&event).unwrap();
         for &v in fv.data.slice(ndarray::s![EMBEDDING_DIM..]).iter() {
-            assert!((0.0..=1.0).contains(&v), "metadata feature {v} out of range");
+            assert!(
+                (0.0..=1.0).contains(&v),
+                "metadata feature {v} out of range"
+            );
         }
     }
 

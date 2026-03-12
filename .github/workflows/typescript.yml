@@ -1,0 +1,126 @@
+name: TypeScript CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "gristmill-integrations/**"
+      - ".github/workflows/typescript.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "gristmill-integrations/**"
+      - ".github/workflows/typescript.yml"
+
+jobs:
+  lint:
+    name: Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: gristmill-integrations/pnpm-lock.yaml
+      - name: Install dependencies
+        working-directory: gristmill-integrations
+        run: pnpm install --frozen-lockfile
+      - name: pnpm lint (tsc --noEmit)
+        working-directory: gristmill-integrations
+        run: pnpm lint
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: gristmill-integrations/pnpm-lock.yaml
+      - name: Install dependencies
+        working-directory: gristmill-integrations
+        run: pnpm install --frozen-lockfile
+      - name: pnpm test
+        working-directory: gristmill-integrations
+        env:
+          GRISTMILL_MOCK_BRIDGE: "1"
+        run: pnpm test
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: gristmill-integrations/pnpm-lock.yaml
+      - name: Install dependencies
+        working-directory: gristmill-integrations
+        run: pnpm install --frozen-lockfile
+      - name: pnpm build
+        working-directory: gristmill-integrations
+        run: pnpm build
+
+  smoke:
+    name: Server Smoke Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: gristmill-integrations/pnpm-lock.yaml
+      - name: Install dependencies
+        working-directory: gristmill-integrations
+        run: pnpm install --frozen-lockfile
+      - name: Start server (background) and run smoke tests
+        working-directory: gristmill-integrations
+        env:
+          GRISTMILL_MOCK_BRIDGE: "1"
+        run: |
+          pnpm exec tsx src/main.ts &
+          SERVER_PID=$!
+          sleep 6
+
+          echo "--- GET /api/metrics/health ---"
+          curl -sf http://127.0.0.1:3000/api/metrics/health | tee /tmp/health.json
+          grep -q '"status":"ok"' /tmp/health.json
+
+          echo "--- POST /events ---"
+          curl -sf -X POST http://127.0.0.1:3000/events \
+            -H "Content-Type: application/json" \
+            -d '{"channel":"ci","payload":{"text":"smoke test"}}' | tee /tmp/events.json
+          grep -q '"route"' /tmp/events.json
+
+          echo "--- POST /api/memory/remember ---"
+          curl -sf -X POST http://127.0.0.1:3000/api/memory/remember \
+            -H "Content-Type: application/json" \
+            -d '{"content":"CI smoke test memory","tags":["ci"]}' | tee /tmp/remember.json
+          grep -q '"id"' /tmp/remember.json
+
+          echo "--- POST /api/memory/recall ---"
+          curl -sf -X POST http://127.0.0.1:3000/api/memory/recall \
+            -H "Content-Type: application/json" \
+            -d '{"query":"smoke test","limit":5}' | tee /tmp/recall.json
+          grep -q '"results"' /tmp/recall.json
+
+          kill $SERVER_PID
+          echo "All smoke tests passed ✓"

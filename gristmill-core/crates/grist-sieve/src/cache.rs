@@ -21,12 +21,12 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 
+#[allow(unused_imports)]
+use metrics;
 use ndarray::Array1;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use tracing::{instrument, trace};
-#[allow(unused_imports)]
-use metrics;
 
 use crate::cost_oracle::RouteDecision;
 use crate::features::FeatureVector;
@@ -76,11 +76,7 @@ pub struct RoutingCache {
 }
 
 impl RoutingCache {
-    pub fn new(
-        exact_capacity: usize,
-        semantic_capacity: usize,
-        similarity_threshold: f32,
-    ) -> Self {
+    pub fn new(exact_capacity: usize, semantic_capacity: usize, similarity_threshold: f32) -> Self {
         Self {
             exact: Mutex::new(lru::LruCache::new(
                 std::num::NonZeroUsize::new(exact_capacity).unwrap(),
@@ -113,7 +109,9 @@ impl RoutingCache {
         {
             let mut exact = self.exact.lock();
             if let Some(decision) = exact.get(&features.text_hash) {
-                self.stats.exact_hits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                self.stats
+                    .exact_hits
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 metrics::counter!("sieve.cache.hit", "tier" => "exact").increment(1);
                 trace!(hash = %features.text_hash, "exact cache hit");
                 return Some(decision.clone());
@@ -122,14 +120,25 @@ impl RoutingCache {
 
         // Level 2: semantic hit.
         // Only attempt if the embedding is non-zero (i.e. embedder is loaded).
-        let embedding_norm = l2_norm(&features.data.slice(ndarray::s![0..crate::features::EMBEDDING_DIM]).to_owned());
+        let embedding_norm = l2_norm(
+            &features
+                .data
+                .slice(ndarray::s![0..crate::features::EMBEDDING_DIM])
+                .to_owned(),
+        );
         if embedding_norm > 1e-8 {
-            let normalized = &features.data.slice(ndarray::s![0..crate::features::EMBEDDING_DIM]).to_owned() / embedding_norm;
+            let normalized = &features
+                .data
+                .slice(ndarray::s![0..crate::features::EMBEDDING_DIM])
+                .to_owned()
+                / embedding_norm;
             let semantic = self.semantic.lock();
             for entry in semantic.iter() {
                 let sim = cosine_similarity_prenorm(&normalized, &entry.embedding);
                 if sim >= self.similarity_threshold {
-                    self.stats.semantic_hits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    self.stats
+                        .semantic_hits
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     metrics::counter!("sieve.cache.hit", "tier" => "semantic").increment(1);
                     trace!(similarity = sim, "semantic cache hit");
                     return Some(entry.decision.clone());
@@ -137,7 +146,9 @@ impl RoutingCache {
             }
         }
 
-        self.stats.misses.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.stats
+            .misses
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         metrics::counter!("sieve.cache.miss").increment(1);
         None
     }
@@ -153,7 +164,10 @@ impl RoutingCache {
         }
 
         // Level 2: semantic (if we have a real embedding).
-        let embedding_slice = features.data.slice(ndarray::s![0..crate::features::EMBEDDING_DIM]).to_owned();
+        let embedding_slice = features
+            .data
+            .slice(ndarray::s![0..crate::features::EMBEDDING_DIM])
+            .to_owned();
         let norm = l2_norm(&embedding_slice);
         if norm > 1e-8 {
             let normalized = embedding_slice / norm;
@@ -242,15 +256,12 @@ fn cosine_similarity_prenorm(a: &Array1<f32>, b: &Array1<f32>) -> f32 {
 mod tests {
     use super::*;
     use crate::cost_oracle::RouteDecision;
-    use grist_event::{ChannelType, GristEvent};
     use crate::features::{FeatureExtractor, FEATURE_DIM};
+    use grist_event::{ChannelType, GristEvent};
     use ndarray::Array1;
 
     fn make_feature_vector(text: &str) -> FeatureVector {
-        let event = GristEvent::new(
-            ChannelType::Http,
-            serde_json::json!({ "text": text }),
-        );
+        let event = GristEvent::new(ChannelType::Http, serde_json::json!({ "text": text }));
         let extractor = FeatureExtractor::new_no_embed();
         extractor.extract(&event).unwrap()
     }
@@ -330,7 +341,10 @@ mod tests {
         };
         let hit = cache.lookup(&fv2);
         // Should hit the semantic tier.
-        assert!(hit.is_some(), "semantic cache should hit for identical embeddings");
+        assert!(
+            hit.is_some(),
+            "semantic cache should hit for identical embeddings"
+        );
     }
 
     #[test]

@@ -104,7 +104,10 @@ impl CheckpointStore {
     pub fn save(&self, checkpoint: &RunCheckpoint) -> Result<(), MillwrightError> {
         if self.inner.dir == Path::new("/dev/null") {
             // noop store
-            self.inner.cache.lock().insert(checkpoint.run_id.clone(), checkpoint.clone());
+            self.inner
+                .cache
+                .lock()
+                .insert(checkpoint.run_id.clone(), checkpoint.clone());
             return Ok(());
         }
 
@@ -118,7 +121,10 @@ impl CheckpointStore {
         std::fs::rename(&tmp_path, &path)?;
 
         debug!(run_id = checkpoint.run_id, path = %path.display(), "checkpoint saved");
-        self.inner.cache.lock().insert(checkpoint.run_id.clone(), checkpoint.clone());
+        self.inner
+            .cache
+            .lock()
+            .insert(checkpoint.run_id.clone(), checkpoint.clone());
         Ok(())
     }
 
@@ -136,7 +142,10 @@ impl CheckpointStore {
         let cp: RunCheckpoint = serde_json::from_str(&json)
             .map_err(|e| MillwrightError::Serialization(e.to_string()))?;
 
-        self.inner.cache.lock().insert(run_id.to_owned(), cp.clone());
+        self.inner
+            .cache
+            .lock()
+            .insert(run_id.to_owned(), cp.clone());
         Ok(cp)
     }
 

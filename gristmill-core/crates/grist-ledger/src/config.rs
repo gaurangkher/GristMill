@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 // LedgerConfig (top-level)
 // ─────────────────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct LedgerConfig {
     #[serde(default)]
     pub hot: HotConfig,
@@ -18,17 +18,6 @@ pub struct LedgerConfig {
     pub cold: ColdConfig,
     #[serde(default)]
     pub compactor: CompactorConfig,
-}
-
-impl Default for LedgerConfig {
-    fn default() -> Self {
-        Self {
-            hot: HotConfig::default(),
-            warm: WarmConfig::default(),
-            cold: ColdConfig::default(),
-            compactor: CompactorConfig::default(),
-        }
-    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -46,12 +35,19 @@ pub struct HotConfig {
     pub sled_path: PathBuf,
 }
 
-fn default_lru_capacity() -> usize { 4096 }
-fn default_sled_path() -> PathBuf { PathBuf::from("./data/ledger/hot") }
+fn default_lru_capacity() -> usize {
+    4096
+}
+fn default_sled_path() -> PathBuf {
+    PathBuf::from("./data/ledger/hot")
+}
 
 impl Default for HotConfig {
     fn default() -> Self {
-        Self { lru_capacity: default_lru_capacity(), sled_path: default_sled_path() }
+        Self {
+            lru_capacity: default_lru_capacity(),
+            sled_path: default_sled_path(),
+        }
     }
 }
 
@@ -75,10 +71,18 @@ pub struct WarmConfig {
     pub vector_capacity: usize,
 }
 
-fn default_db_path() -> PathBuf { PathBuf::from("./data/ledger/warm.db") }
-fn default_vector_index_path() -> PathBuf { PathBuf::from("./data/ledger/vectors.usearch") }
-fn default_embedding_dim() -> usize { 384 }
-fn default_vector_capacity() -> usize { 100_000 }
+fn default_db_path() -> PathBuf {
+    PathBuf::from("./data/ledger/warm.db")
+}
+fn default_vector_index_path() -> PathBuf {
+    PathBuf::from("./data/ledger/vectors.usearch")
+}
+fn default_embedding_dim() -> usize {
+    384
+}
+fn default_vector_capacity() -> usize {
+    100_000
+}
 
 impl Default for WarmConfig {
     fn default() -> Self {
@@ -105,12 +109,19 @@ pub struct ColdConfig {
     pub compress_level: i32,
 }
 
-fn default_archive_dir() -> PathBuf { PathBuf::from("./data/ledger/cold") }
-fn default_compress_level() -> i32 { 3 }
+fn default_archive_dir() -> PathBuf {
+    PathBuf::from("./data/ledger/cold")
+}
+fn default_compress_level() -> i32 {
+    3
+}
 
 impl Default for ColdConfig {
     fn default() -> Self {
-        Self { archive_dir: default_archive_dir(), compress_level: default_compress_level() }
+        Self {
+            archive_dir: default_archive_dir(),
+            compress_level: default_compress_level(),
+        }
     }
 }
 
@@ -135,10 +146,18 @@ pub struct CompactorConfig {
     pub stale_days: u64,
 }
 
-fn default_interval_secs() -> u64 { 6 * 3600 }
-fn default_similarity_threshold() -> f32 { 0.90 }
-fn default_verbose_threshold_tokens() -> usize { 512 }
-fn default_stale_days() -> u64 { 90 }
+fn default_interval_secs() -> u64 {
+    6 * 3600
+}
+fn default_similarity_threshold() -> f32 {
+    0.90
+}
+fn default_verbose_threshold_tokens() -> usize {
+    512
+}
+fn default_stale_days() -> u64 {
+    90
+}
 
 impl Default for CompactorConfig {
     fn default() -> Self {

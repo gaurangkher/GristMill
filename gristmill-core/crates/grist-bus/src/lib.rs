@@ -113,8 +113,7 @@ impl EventBus {
             match tx.send(payload) {
                 Ok(n) => {
                     debug!(topic, receivers = n, "published bus event");
-                    counter!("bus.events_published", "topic" => topic.to_string())
-                        .increment(1);
+                    counter!("bus.events_published", "topic" => topic.to_string()).increment(1);
                 }
                 Err(_) => {
                     // All receivers have been dropped — not an error.
@@ -220,8 +219,7 @@ impl EventBus {
 
     /// Return a sorted list of known topic names.
     pub fn topics(&self) -> Vec<String> {
-        let mut names: Vec<String> =
-            self.topics.iter().map(|e| e.key().clone()).collect();
+        let mut names: Vec<String> = self.topics.iter().map(|e| e.key().clone()).collect();
         names.sort();
         names
     }
@@ -286,7 +284,7 @@ mod tests {
         {
             let _rx = bus.subscribe("ephemeral.topic");
         } // rx dropped here
-        // Should not panic even though receiver is gone.
+          // Should not panic even though receiver is gone.
         bus.publish("ephemeral.topic", serde_json::json!({"x": 1}));
     }
 
@@ -297,10 +295,7 @@ mod tests {
         use grist_event::{ChannelType, GristEvent};
         let bus = EventBus::default();
         let mut rx = bus.subscribe("event.topic");
-        let event = GristEvent::new(
-            ChannelType::Cli,
-            serde_json::json!({"text": "hello"}),
-        );
+        let event = GristEvent::new(ChannelType::Cli, serde_json::json!({"text": "hello"}));
         let id = event.id.to_string();
         assert!(bus.publish_event("event.topic", &event));
         let received = rx.recv().await.unwrap();

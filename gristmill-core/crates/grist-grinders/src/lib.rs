@@ -100,7 +100,7 @@ impl Grinders {
     pub fn new(config: GrindersConfig) -> Result<Self, GrindersError> {
         info!(
             workers = config.worker_threads,
-            models  = config.models.len(),
+            models = config.models.len(),
             "initialising Grinders pool",
         );
 
@@ -125,17 +125,18 @@ impl Grinders {
             "Grinders pool ready",
         );
 
-        Ok(Self { registry, pool, config })
+        Ok(Self {
+            registry,
+            pool,
+            config,
+        })
     }
 
     /// Submit a single inference request to the worker pool.
     ///
     /// Uses the per-model timeout if available; otherwise falls back to 5 s.
     #[instrument(level = "debug", skip(self, request), fields(model_id = %request.model_id))]
-    pub async fn infer(
-        &self,
-        request: InferenceRequest,
-    ) -> Result<InferenceOutput, GrindersError> {
+    pub async fn infer(&self, request: InferenceRequest) -> Result<InferenceOutput, GrindersError> {
         // Look up the per-model timeout from the config.
         let timeout = self
             .config
@@ -179,9 +180,7 @@ impl Grinders {
     /// Build a concrete [`grist_sieve::features::EmbedderSession`] backed by
     /// the `minilm-l6-v2` model.  Inject this into the Sieve's
     /// `FeatureExtractor` to enable semantic similarity caching.
-    pub fn build_embedder(
-        &self,
-    ) -> Result<grist_sieve::features::EmbedderSession, GrindersError> {
+    pub fn build_embedder(&self) -> Result<grist_sieve::features::EmbedderSession, GrindersError> {
         embedder::build_minilm_embedder(&self.config)
     }
 }
@@ -237,7 +236,11 @@ mod tests {
         assert!(out.tensor.is_some(), "expected tensor output");
 
         // After first infer the model should be warm.
-        assert_eq!(g.warm_model_count(), 1, "model should be warm after first load");
+        assert_eq!(
+            g.warm_model_count(),
+            1,
+            "model should be warm after first load"
+        );
     }
 
     // ── G-07: Unknown model returns ModelNotFound ─────────────────────────
@@ -310,10 +313,8 @@ mod tests {
             .map(|_| {
                 let g = Arc::clone(&g);
                 tokio::spawn(async move {
-                    let req = InferenceRequest::from_features(
-                        "stub-model",
-                        Array2::zeros((1, 392)),
-                    );
+                    let req =
+                        InferenceRequest::from_features("stub-model", Array2::zeros((1, 392)));
                     g.infer(req).await
                 })
             })

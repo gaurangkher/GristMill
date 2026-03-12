@@ -14,13 +14,13 @@
 //! blocking contexts (use `tokio::task::spawn_blocking`).
 
 use parking_lot::Mutex;
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{params, Connection, OptionalExtension};
 use tracing::{debug, info, warn};
 use ulid::Ulid;
 
 use crate::config::WarmConfig;
 use crate::error::LedgerError;
-use crate::memory::{Memory, MemoryId, Tier, now_ms};
+use crate::memory::{now_ms, Memory, MemoryId, Tier};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // WarmTier
@@ -325,8 +325,11 @@ impl WarmTier {
             if let Some(rowid) = fts_rowid {
                 conn.execute("DELETE FROM memories_fts WHERE rowid = ?1", params![rowid])
                     .map_err(|e| LedgerError::WarmTier(format!("fts delete: {e}")))?;
-                conn.execute("DELETE FROM fts_rowid_map WHERE memory_id = ?1", params![id])
-                    .map_err(|e| LedgerError::WarmTier(format!("fts_rowid_map delete: {e}")))?;
+                conn.execute(
+                    "DELETE FROM fts_rowid_map WHERE memory_id = ?1",
+                    params![id],
+                )
+                .map_err(|e| LedgerError::WarmTier(format!("fts_rowid_map delete: {e}")))?;
             }
         }
         let key = ulid_to_u64(id);
@@ -489,8 +492,17 @@ fn escape_fts_query(query: &str) -> String {
         .split_whitespace()
         .map(|w| {
             // Strip chars that have special meaning in FTS5 queries.
-            let clean: String = w.chars()
-                .filter(|&c| c != '"' && c != '\'' && c != '(' && c != ')' && c != ':' && c != '*' && c != '^')
+            let clean: String = w
+                .chars()
+                .filter(|&c| {
+                    c != '"'
+                        && c != '\''
+                        && c != '('
+                        && c != ')'
+                        && c != ':'
+                        && c != '*'
+                        && c != '^'
+                })
                 .collect();
             format!("\"{clean}\"")
         })
@@ -623,7 +635,10 @@ mod tests {
         warm.insert(&m, &emb).unwrap();
         // Search with the same embedding → distance ≈ 0 → sim ≈ 1.0 > 0.95
         let found = warm.find_similar(&emb, 0.95).unwrap();
-        assert!(found.is_some(), "identical embedding should match at 0.95 threshold");
+        assert!(
+            found.is_some(),
+            "identical embedding should match at 0.95 threshold"
+        );
     }
 
     #[test]
@@ -671,8 +686,14 @@ mod tests {
 
         let cutoff = now_ms() - 1000; // everything older than 1 second ago
         let stale = warm.find_stale(cutoff).unwrap();
-        assert!(stale.iter().any(|x| x.id == m.id), "stale memory should be found");
-        assert!(!stale.iter().any(|x| x.id == fresh.id), "fresh memory should not be stale");
+        assert!(
+            stale.iter().any(|x| x.id == m.id),
+            "stale memory should be found"
+        );
+        assert!(
+            !stale.iter().any(|x| x.id == fresh.id),
+            "fresh memory should not be stale"
+        );
     }
 
     #[test]
@@ -705,8 +726,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let warm = make_warm(&dir);
         assert_eq!(warm.count().unwrap(), 0);
-        warm.insert(&Memory::new("a", vec![]), &tiny_embedding(1.0)).unwrap();
-        warm.insert(&Memory::new("b", vec![]), &tiny_embedding(0.5)).unwrap();
+        warm.insert(&Memory::new("a", vec![]), &tiny_embedding(1.0))
+            .unwrap();
+        warm.insert(&Memory::new("b", vec![]), &tiny_embedding(0.5))
+            .unwrap();
         assert_eq!(warm.count().unwrap(), 2);
     }
 }

@@ -58,6 +58,7 @@ CHANNEL_ORDINAL: dict[str, int] = {
 
 # ── Type alias ────────────────────────────────────────────────────────────────
 
+
 class FeedbackRecord:
     """One row from a feedback JSONL file."""
 
@@ -191,6 +192,7 @@ def generate_synthetic_records(n: int = 1000) -> list[FeedbackRecord]:
 
 
 # ── Dataset ───────────────────────────────────────────────────────────────────
+
 
 class FeedbackDataset:
     """PyTorch-compatible dataset built from GristMill feedback JSONL logs.

@@ -10,8 +10,8 @@
 
 use std::sync::Arc;
 
-use grist_grinders::GrindersConfig;
 use grist_grinders::embedder::build_minilm_embedder;
+use grist_grinders::GrindersConfig;
 use grist_ledger::{Embedder, LedgerError, ZeroEmbedder};
 use grist_sieve::features::EMBEDDING_DIM;
 

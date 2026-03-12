@@ -18,11 +18,9 @@ from __future__ import annotations
 
 import argparse
 import logging
-import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
-import numpy as np
 import torch
 
 if TYPE_CHECKING:
@@ -97,9 +95,7 @@ class OnnxExporter:
             logger.info("Classifier exported (INT8): %s", output_path)
             return output_path
         except Exception as exc:
-            logger.warning(
-                "INT8 quantization failed (%s) — falling back to fp32 model", exc
-            )
+            logger.warning("INT8 quantization failed (%s) — falling back to fp32 model", exc)
             fp32_path.rename(output_path)
             return output_path
 
@@ -246,18 +242,18 @@ class OnnxExporter:
 
 # ── CLI entry-point ───────────────────────────────────────────────────────────
 
+
 def main() -> None:  # pragma: no cover
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
     parser = argparse.ArgumentParser(description="Export GristMill models to ONNX")
-    parser.add_argument(
-        "--model", choices=["classifier", "embedder"], required=True
-    )
+    parser.add_argument("--model", choices=["classifier", "embedder"], required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--no-quantize", action="store_true")
     args = parser.parse_args()
 
     if args.model == "classifier":
         from gristmill_ml.training.sieve_trainer import SieveClassifierHead
+
         model = SieveClassifierHead()
         OnnxExporter.export_classifier(model, args.output, quantize=not args.no_quantize)
     elif args.model == "embedder":

@@ -197,10 +197,7 @@ mod tests {
     }
 
     fn event(text: &str) -> GristEvent {
-        GristEvent::new(
-            ChannelType::Http,
-            serde_json::json!({ "text": text }),
-        )
+        GristEvent::new(ChannelType::Http, serde_json::json!({ "text": text }))
     }
 
     // ── Registration ──────────────────────────────────────────────────────
@@ -208,10 +205,12 @@ mod tests {
     #[tokio::test]
     async fn register_and_run_pipeline() {
         let mw = mw();
-        mw.register_pipeline(
-            Pipeline::new("test-pipe")
-                .with_step(Step::new("a", StepType::LocalMl { model_id: "m".into() })),
-        );
+        mw.register_pipeline(Pipeline::new("test-pipe").with_step(Step::new(
+            "a",
+            StepType::LocalMl {
+                model_id: "m".into(),
+            },
+        )));
         assert_eq!(mw.pipeline_ids(), vec!["test-pipe"]);
         let result = mw.run("test-pipe", &event("hello")).await.unwrap();
         assert!(result.succeeded);
@@ -229,7 +228,9 @@ mod tests {
         let mw = mw();
         mw.register_pipeline(Pipeline::new("p").with_step(Step::new(
             "s",
-            StepType::Rule { rule_id: "r".into() },
+            StepType::Rule {
+                rule_id: "r".into(),
+            },
         )));
         assert!(mw.remove_pipeline("p"));
         assert!(!mw.remove_pipeline("p")); // already removed
@@ -242,7 +243,9 @@ mod tests {
         let mw = mw();
         let p = Pipeline::new("direct").with_step(Step::new(
             "s",
-            StepType::LocalMl { model_id: "m".into() },
+            StepType::LocalMl {
+                model_id: "m".into(),
+            },
         ));
         let result = mw.run_pipeline(&p, &event("hi")).await.unwrap();
         assert!(result.succeeded);
@@ -256,12 +259,40 @@ mod tests {
         let mw = mw();
         // a → {b, c} → d (diamond)
         let p = Pipeline::new("diamond")
-            .with_step(Step::new("a", StepType::LocalMl { model_id: "m".into() }))
-            .with_step(Step::new("b", StepType::Rule { rule_id: "r1".into() }).with_deps(["a"]))
-            .with_step(Step::new("c", StepType::Rule { rule_id: "r2".into() }).with_deps(["a"]))
-            .with_step(Step::new("d", StepType::Llm {
-                prompt_template: "summarise".into(), max_tokens: 64,
-            }).with_deps(["b", "c"]));
+            .with_step(Step::new(
+                "a",
+                StepType::LocalMl {
+                    model_id: "m".into(),
+                },
+            ))
+            .with_step(
+                Step::new(
+                    "b",
+                    StepType::Rule {
+                        rule_id: "r1".into(),
+                    },
+                )
+                .with_deps(["a"]),
+            )
+            .with_step(
+                Step::new(
+                    "c",
+                    StepType::Rule {
+                        rule_id: "r2".into(),
+                    },
+                )
+                .with_deps(["a"]),
+            )
+            .with_step(
+                Step::new(
+                    "d",
+                    StepType::Llm {
+                        prompt_template: "summarise".into(),
+                        max_tokens: 64,
+                    },
+                )
+                .with_deps(["b", "c"]),
+            );
 
         let result = mw.run_pipeline(&p, &event("complex event")).await.unwrap();
         assert!(result.succeeded);
@@ -274,8 +305,18 @@ mod tests {
     async fn step_with_retry_policy_succeeds() {
         let mw = mw();
         let p = Pipeline::new("p").with_step(
-            Step::new("a", StepType::LocalMl { model_id: "m".into() })
-                .with_retry(RetryPolicy { max_retries: 2, initial_delay_ms: 1, jitter: false, ..Default::default() }),
+            Step::new(
+                "a",
+                StepType::LocalMl {
+                    model_id: "m".into(),
+                },
+            )
+            .with_retry(RetryPolicy {
+                max_retries: 2,
+                initial_delay_ms: 1,
+                jitter: false,
+                ..Default::default()
+            }),
         );
         let result = mw.run_pipeline(&p, &event("x")).await.unwrap();
         assert!(result.succeeded);
@@ -289,8 +330,21 @@ mod tests {
     async fn gate_open_pipeline_succeeds() {
         let mw = mw();
         let p = Pipeline::new("p")
-            .with_step(Step::new("g", StepType::Gate { condition: "always_true".into() }))
-            .with_step(Step::new("a", StepType::Rule { rule_id: "r".into() }).with_deps(["g"]));
+            .with_step(Step::new(
+                "g",
+                StepType::Gate {
+                    condition: "always_true".into(),
+                },
+            ))
+            .with_step(
+                Step::new(
+                    "a",
+                    StepType::Rule {
+                        rule_id: "r".into(),
+                    },
+                )
+                .with_deps(["g"]),
+            );
         let result = mw.run_pipeline(&p, &event("x")).await.unwrap();
         assert!(result.succeeded);
         assert_eq!(result.step_results.len(), 2);
@@ -301,7 +355,9 @@ mod tests {
         let mw = mw();
         let p = Pipeline::new("p").with_step(Step::new(
             "g",
-            StepType::Gate { condition: "always_false".into() },
+            StepType::Gate {
+                condition: "always_false".into(),
+            },
         ));
         let err = mw.run_pipeline(&p, &event("x")).await.unwrap_err();
         assert!(matches!(err, MillwrightError::GateRejected { .. }));
@@ -313,7 +369,12 @@ mod tests {
     async fn skip_and_continue_lets_pipeline_finish() {
         let mw = mw();
         let p = Pipeline::new("p")
-            .with_step(Step::new("g", StepType::Gate { condition: "always_false".into() }))
+            .with_step(Step::new(
+                "g",
+                StepType::Gate {
+                    condition: "always_false".into(),
+                },
+            ))
             .with_failure_policy(FailurePolicy::SkipAndContinue);
         let result = mw.run_pipeline(&p, &event("x")).await.unwrap();
         assert!(matches!(
@@ -328,8 +389,24 @@ mod tests {
     async fn cyclic_pipeline_returns_error() {
         let mw = mw();
         let p = Pipeline::new("cycle")
-            .with_step(Step::new("a", StepType::Rule { rule_id: "r".into() }).with_deps(["b"]))
-            .with_step(Step::new("b", StepType::Rule { rule_id: "r".into() }).with_deps(["a"]));
+            .with_step(
+                Step::new(
+                    "a",
+                    StepType::Rule {
+                        rule_id: "r".into(),
+                    },
+                )
+                .with_deps(["b"]),
+            )
+            .with_step(
+                Step::new(
+                    "b",
+                    StepType::Rule {
+                        rule_id: "r".into(),
+                    },
+                )
+                .with_deps(["a"]),
+            );
         let err = mw.run_pipeline(&p, &event("x")).await.unwrap_err();
         assert!(matches!(err, MillwrightError::CyclicDependency { .. }));
     }
@@ -339,8 +416,12 @@ mod tests {
     #[tokio::test]
     async fn run_id_is_a_ulid() {
         let mw = mw();
-        let p = Pipeline::new("p")
-            .with_step(Step::new("s", StepType::Rule { rule_id: "r".into() }));
+        let p = Pipeline::new("p").with_step(Step::new(
+            "s",
+            StepType::Rule {
+                rule_id: "r".into(),
+            },
+        ));
         let result = mw.run_pipeline(&p, &event("x")).await.unwrap();
         // ULID is 26 chars
         assert_eq!(result.run_id.len(), 26);
@@ -351,8 +432,12 @@ mod tests {
     #[tokio::test]
     async fn elapsed_ms_is_positive() {
         let mw = mw();
-        let p = Pipeline::new("p")
-            .with_step(Step::new("s", StepType::LocalMl { model_id: "m".into() }));
+        let p = Pipeline::new("p").with_step(Step::new(
+            "s",
+            StepType::LocalMl {
+                model_id: "m".into(),
+            },
+        ));
         let result = mw.run_pipeline(&p, &event("x")).await.unwrap();
         // elapsed should be at least a few microseconds > 0 (even if sub-millisecond)
         // We allow 0 on very fast CI machines but the field must exist.

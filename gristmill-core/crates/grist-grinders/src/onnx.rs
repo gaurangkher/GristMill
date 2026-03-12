@@ -48,7 +48,9 @@ pub fn load_onnx_session(config: &ModelConfig) -> Result<GrindersSession, Grinde
 
         Ok(GrindersSession {
             model_id: config.model_id.clone(),
-            kind: SessionKind::Stub { model_id: config.model_id.clone() },
+            kind: SessionKind::Stub {
+                model_id: config.model_id.clone(),
+            },
             timeout: config.timeout,
             max_tokens: config.max_tokens,
         })

@@ -31,9 +31,9 @@ use ndarray::Array1;
 #[cfg(feature = "onnx")]
 use tracing::{debug, instrument};
 
-use grist_sieve::features::{EmbedderSession, EMBEDDING_DIM};
 #[cfg(feature = "onnx")]
 use grist_sieve::error::SieveError;
+use grist_sieve::features::{EmbedderSession, EMBEDDING_DIM};
 
 use crate::config::GrindersConfig;
 #[cfg(feature = "onnx")]
@@ -56,14 +56,13 @@ const MINILM_MAX_LEN: usize = 128;
 ///
 /// **Production usage**: compile with `--features onnx` and ensure
 /// `minilm-l6-v2.onnx` is present on disk (run `gristmill models pull`).
-pub fn build_minilm_embedder(config: &GrindersConfig) -> Result<EmbedderSession, crate::error::GrindersError> {
+pub fn build_minilm_embedder(
+    config: &GrindersConfig,
+) -> Result<EmbedderSession, crate::error::GrindersError> {
     // Locate the MiniLM config entry (only needed when ONNX feature is enabled).
     #[cfg(feature = "onnx")]
     {
-        let model_cfg = config
-            .models
-            .iter()
-            .find(|m| m.model_id == "minilm-l6-v2");
+        let model_cfg = config.models.iter().find(|m| m.model_id == "minilm-l6-v2");
         if let Some(cfg) = model_cfg {
             if cfg.path.exists() {
                 return build_onnx_embedder(cfg);
@@ -119,9 +118,7 @@ fn build_onnx_embedder(
     tracing::info!(path = %cfg.path.display(), "MiniLM embedder loaded");
     metrics::counter!("grinders.embedder.loads").increment(1);
 
-    let embedder = EmbedderSession::from_fn(move |text: &str| {
-        embed_with_session(&session, text)
-    });
+    let embedder = EmbedderSession::from_fn(move |text: &str| embed_with_session(&session, text));
 
     Ok(embedder)
 }
@@ -129,10 +126,7 @@ fn build_onnx_embedder(
 /// Run one MiniLM embedding inference call.
 #[cfg(feature = "onnx")]
 #[instrument(level = "trace", skip(session))]
-fn embed_with_session(
-    session: &ort::Session,
-    text: &str,
-) -> Result<Array1<f32>, SieveError> {
+fn embed_with_session(session: &ort::Session, text: &str) -> Result<Array1<f32>, SieveError> {
     use ort::inputs;
 
     let (input_ids, attention_mask, token_type_ids) = tokenize_for_minilm(text, MINILM_MAX_LEN);
@@ -153,9 +147,9 @@ fn embed_with_session(
     // We mean-pool over the sequence dimension to get [384].
     let hidden = outputs
         .get("last_hidden_state")
-        .ok_or_else(|| SieveError::FeatureExtraction(
-            "MiniLM output 'last_hidden_state' not found".into(),
-        ))?
+        .ok_or_else(|| {
+            SieveError::FeatureExtraction("MiniLM output 'last_hidden_state' not found".into())
+        })?
         .try_extract_tensor::<f32>()
         .map_err(|e| SieveError::FeatureExtraction(e.to_string()))?;
 

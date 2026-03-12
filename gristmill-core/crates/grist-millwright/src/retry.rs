@@ -44,11 +44,21 @@ pub struct RetryPolicy {
     pub jitter: bool,
 }
 
-fn default_max_retries() -> u32 { 3 }
-fn default_initial_delay_ms() -> u64 { 500 }
-fn default_backoff_factor() -> f64 { 2.0 }
-fn default_max_delay_ms() -> u64 { 30_000 }
-fn default_true() -> bool { true }
+fn default_max_retries() -> u32 {
+    3
+}
+fn default_initial_delay_ms() -> u64 {
+    500
+}
+fn default_backoff_factor() -> f64 {
+    2.0
+}
+fn default_max_delay_ms() -> u64 {
+    30_000
+}
+fn default_true() -> bool {
+    true
+}
 
 impl Default for RetryPolicy {
     fn default() -> Self {
@@ -66,8 +76,7 @@ impl RetryPolicy {
     /// Compute the delay before attempt number `attempt` (0-indexed, so
     /// `attempt = 0` is the *first* retry, i.e. after the initial failure).
     pub fn delay(&self, attempt: u32) -> Duration {
-        let base = self.initial_delay_ms as f64
-            * self.backoff_factor.powi(attempt as i32);
+        let base = self.initial_delay_ms as f64 * self.backoff_factor.powi(attempt as i32);
         let capped = base.min(self.max_delay_ms as f64);
         let millis = if self.jitter {
             // ±20 % jitter using a fast LCG-derived pseudo-random value
@@ -140,7 +149,9 @@ where
                 }
                 let delay = policy.delay(attempt);
                 warn!(
-                    step_id, attempt, ?e,
+                    step_id,
+                    attempt,
+                    ?e,
                     delay_ms = delay.as_millis(),
                     "step failed, will retry",
                 );
@@ -207,18 +218,25 @@ mod tests {
         for _ in 0..20 {
             let d = p.delay(0).as_millis();
             // ±20% of 1000 → [600, 1400]
-            assert!(d >= 600 && d <= 1_400, "jitter delay {d} out of expected range");
+            assert!(
+                (600..=1_400).contains(&d),
+                "jitter delay {d} out of expected range"
+            );
         }
     }
 
     #[tokio::test]
     async fn run_with_retry_succeeds_on_first_try() {
-        let policy = RetryPolicy { max_retries: 3, ..Default::default() };
+        let policy = RetryPolicy {
+            max_retries: 3,
+            ..Default::default()
+        };
         let mut calls = 0u32;
         let result: Result<i32, String> = run_with_retry(&policy, "test", || {
             calls += 1;
             async { Ok(42) }
-        }).await;
+        })
+        .await;
         assert_eq!(result.unwrap(), 42);
         assert_eq!(calls, 1);
     }
@@ -236,9 +254,14 @@ mod tests {
         let result: Result<i32, String> = run_with_retry(&policy, "test", || {
             let c = calls2.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             async move {
-                if c < 2 { Err("not yet".to_string()) } else { Ok(99) }
+                if c < 2 {
+                    Err("not yet".to_string())
+                } else {
+                    Ok(99)
+                }
             }
-        }).await;
+        })
+        .await;
         assert_eq!(result.unwrap(), 99);
         assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 3);
     }
@@ -256,7 +279,8 @@ mod tests {
         let result: Result<i32, String> = run_with_retry(&policy, "test", || {
             calls2.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             async { Err("always fails".to_string()) }
-        }).await;
+        })
+        .await;
         assert!(result.is_err());
         // 1 initial + 2 retries = 3 total attempts
         assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 3);

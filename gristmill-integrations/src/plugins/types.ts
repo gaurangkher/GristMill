@@ -5,7 +5,7 @@
  * custom adapters, notification channels, and pipeline step types.
  */
 
-import type { GristMillBridge, GristEventInit, RouteDecision } from "../core/bridge.js";
+import type { IBridge, GristEventInit, RouteDecision } from "../core/bridge.js";
 import type { Notification } from "../bell-tower/dispatcher.js";
 
 // ── Adapter handler ───────────────────────────────────────────────────────────
@@ -29,7 +29,7 @@ export interface NotificationChannel {
 
 /** Context provided to a pipeline step executor contributed by a plugin. */
 export interface StepContext {
-  bridge: GristMillBridge;
+  bridge: IBridge;
   stepId: string;
   pipelineId: string;
   input: unknown;
@@ -50,7 +50,7 @@ export type StepExecutor = (
 
 export interface PluginContext {
   /** The GristMill bridge — gives plugins access to triage, memory, escalate, etc. */
-  bridge: GristMillBridge;
+  bridge: IBridge;
 
   /**
    * Register a named event adapter.

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 import warnings
-from typing import Any, Optional
+from typing import Optional
 
 HAS_NATIVE: bool = False
 
@@ -61,6 +61,7 @@ except ImportError:
         @property
         def timestamp_ms(self) -> int:
             import time
+
             return int(time.time() * 1000)
 
     class PyRouteDecision:  # type: ignore[no-redef]
@@ -81,19 +82,27 @@ except ImportError:
             self.estimated_tokens = estimated_tokens
 
         def to_json(self) -> str:
-            return json.dumps({
-                "route": self.route,
-                "confidence": self.confidence,
-                "model_id": self.model_id,
-                "reason": self.reason,
-                "estimated_tokens": self.estimated_tokens,
-            })
+            return json.dumps(
+                {
+                    "route": self.route,
+                    "confidence": self.confidence,
+                    "model_id": self.model_id,
+                    "reason": self.reason,
+                    "estimated_tokens": self.estimated_tokens,
+                }
+            )
 
     class PyMemory:  # type: ignore[no-redef]
         """Stub memory class."""
 
-        def __init__(self, id: str = "", content: str = "", tags: list[str] | None = None,
-                     created_at_ms: int = 0, tier: str = "hot") -> None:
+        def __init__(
+            self,
+            id: str = "",
+            content: str = "",
+            tags: list[str] | None = None,
+            created_at_ms: int = 0,
+            tier: str = "hot",
+        ) -> None:
             self.id = id
             self.content = content
             self.tags = tags or []

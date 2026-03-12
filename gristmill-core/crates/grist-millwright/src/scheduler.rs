@@ -297,8 +297,8 @@ impl DagScheduler {
 
         // ── Inner helper: enqueue all currently-ready steps ───────────────
         let enqueue_ready = |enqueued: &mut HashSet<String>,
-                              join_set: &mut tokio::task::JoinSet<_>,
-                              completed: &DashMap<String, StepResult>| {
+                             join_set: &mut tokio::task::JoinSet<_>,
+                             completed: &DashMap<String, StepResult>| {
             let completed_ids: HashSet<String> =
                 completed.iter().map(|e| e.key().clone()).collect();
 
@@ -448,7 +448,9 @@ async fn execute_step(
         match gate_evaluator
             .evaluate(
                 &step.id,
-                &GateType::Channel { channel: channel.to_owned() },
+                &GateType::Channel {
+                    channel: channel.to_owned(),
+                },
                 &context,
                 timeout,
             )
@@ -459,7 +461,9 @@ async fn execute_step(
                 return match failure_policy {
                     FailurePolicy::SkipAndContinue => Ok(StepResult {
                         step_id: step.id.clone(),
-                        outcome: StepOutcome::Skipped { reason: reason.clone() },
+                        outcome: StepOutcome::Skipped {
+                            reason: reason.clone(),
+                        },
                         output: Value::Null,
                         attempts: 0,
                         elapsed_ms: t0.elapsed().as_millis() as u64,
@@ -480,7 +484,9 @@ async fn execute_step(
         let decision = gate_evaluator
             .evaluate(
                 &step.id,
-                &GateType::Auto { predicate: condition.clone() },
+                &GateType::Auto {
+                    predicate: condition.clone(),
+                },
                 &context,
                 timeout,
             )
@@ -497,7 +503,9 @@ async fn execute_step(
             GateDecision::Closed { reason } => match failure_policy {
                 FailurePolicy::SkipAndContinue => Ok(StepResult {
                     step_id: step.id.clone(),
-                    outcome: StepOutcome::Skipped { reason: reason.clone() },
+                    outcome: StepOutcome::Skipped {
+                        reason: reason.clone(),
+                    },
                     output: Value::Null,
                     attempts: 1,
                     elapsed_ms: t0.elapsed().as_millis() as u64,
@@ -511,7 +519,10 @@ async fn execute_step(
     }
 
     // ── 3. Run step with retry + timeout ──────────────────────────────────
-    let default_policy = RetryPolicy { max_retries: 0, ..Default::default() };
+    let default_policy = RetryPolicy {
+        max_retries: 0,
+        ..Default::default()
+    };
     let policy = step.retry.as_ref().unwrap_or(&default_policy);
     let step_timeout = step.timeout_ms.map(Duration::from_millis);
 
@@ -521,9 +532,7 @@ async fn execute_step(
         attempts += 1;
         let input = input.clone();
         let step = step.clone();
-        async move {
-            run_step_once(&step, &input, step_timeout).await
-        }
+        async move { run_step_once(&step, &input, step_timeout).await }
     })
     .await;
 
@@ -543,8 +552,7 @@ async fn execute_step(
         Err(e) => {
             let elapsed_ms = t0.elapsed().as_millis() as u64;
             let reason = e.to_string();
-            metrics::counter!("millwright.step.failed", "step_id" => step.id.clone())
-                .increment(1);
+            metrics::counter!("millwright.step.failed", "step_id" => step.id.clone()).increment(1);
             match failure_policy {
                 FailurePolicy::SkipAndContinue => Ok(StepResult {
                     step_id: step.id.clone(),
@@ -572,12 +580,14 @@ async fn run_step_once(
     let fut = dispatch_step(step, input);
 
     match timeout {
-        Some(t) => tokio::time::timeout(t, fut).await.map_err(|_| {
-            MillwrightError::StepTimeout {
-                step_id: step.id.clone(),
-                elapsed_ms: t.as_millis() as u64,
-            }
-        })?,
+        Some(t) => {
+            tokio::time::timeout(t, fut)
+                .await
+                .map_err(|_| MillwrightError::StepTimeout {
+                    step_id: step.id.clone(),
+                    elapsed_ms: t.as_millis() as u64,
+                })?
+        }
         None => fut.await,
     }
 }
@@ -614,7 +624,10 @@ async fn dispatch_step(step: &Step, input: &GristEvent) -> Result<Value, Millwri
             }))
         }
 
-        StepType::Llm { prompt_template, max_tokens } => {
+        StepType::Llm {
+            prompt_template,
+            max_tokens,
+        } => {
             debug!(step_id = %step.id, max_tokens, "dispatching Llm step");
             // Stub — grist-hammer will be wired in when available.
             Ok(serde_json::json!({
@@ -680,16 +693,24 @@ mod tests {
     }
 
     fn event(text: &str) -> GristEvent {
-        GristEvent::new(ChannelType::Internal { subsystem: "test".into() },
-                        serde_json::json!({ "text": text }))
+        GristEvent::new(
+            ChannelType::Internal {
+                subsystem: "test".into(),
+            },
+            serde_json::json!({ "text": text }),
+        )
     }
 
     // ── Single-step pipelines ─────────────────────────────────────────────
 
     #[tokio::test]
     async fn single_local_ml_step_succeeds() {
-        let p = Pipeline::new("p")
-            .with_step(Step::new("a", StepType::LocalMl { model_id: "m".into() }));
+        let p = Pipeline::new("p").with_step(Step::new(
+            "a",
+            StepType::LocalMl {
+                model_id: "m".into(),
+            },
+        ));
         let result = scheduler().execute(&p, &event("hello")).await.unwrap();
         assert!(result.succeeded);
         assert_eq!(result.step_results.len(), 1);
@@ -699,8 +720,12 @@ mod tests {
 
     #[tokio::test]
     async fn single_rule_step_succeeds() {
-        let p = Pipeline::new("p")
-            .with_step(Step::new("r", StepType::Rule { rule_id: "no-op".into() }));
+        let p = Pipeline::new("p").with_step(Step::new(
+            "r",
+            StepType::Rule {
+                rule_id: "no-op".into(),
+            },
+        ));
         let result = scheduler().execute(&p, &event("cmd")).await.unwrap();
         assert!(result.succeeded);
     }
@@ -709,7 +734,10 @@ mod tests {
     async fn llm_step_returns_stub_output() {
         let p = Pipeline::new("p").with_step(Step::new(
             "llm",
-            StepType::Llm { prompt_template: "Summarize: {text}".into(), max_tokens: 128 },
+            StepType::Llm {
+                prompt_template: "Summarize: {text}".into(),
+                max_tokens: 128,
+            },
         ));
         let result = scheduler().execute(&p, &event("long text")).await.unwrap();
         assert!(result.succeeded);
@@ -721,9 +749,30 @@ mod tests {
     #[tokio::test]
     async fn sequential_chain_runs_in_order() {
         let p = Pipeline::new("chain")
-            .with_step(Step::new("a", StepType::LocalMl { model_id: "m".into() }))
-            .with_step(Step::new("b", StepType::Rule { rule_id: "r".into() }).with_deps(["a"]))
-            .with_step(Step::new("c", StepType::LocalMl { model_id: "m2".into() }).with_deps(["b"]));
+            .with_step(Step::new(
+                "a",
+                StepType::LocalMl {
+                    model_id: "m".into(),
+                },
+            ))
+            .with_step(
+                Step::new(
+                    "b",
+                    StepType::Rule {
+                        rule_id: "r".into(),
+                    },
+                )
+                .with_deps(["a"]),
+            )
+            .with_step(
+                Step::new(
+                    "c",
+                    StepType::LocalMl {
+                        model_id: "m2".into(),
+                    },
+                )
+                .with_deps(["b"]),
+            );
 
         let result = scheduler().execute(&p, &event("text")).await.unwrap();
         assert!(result.succeeded);
@@ -736,10 +785,39 @@ mod tests {
     async fn diamond_dag_runs_parallel_branches() {
         // a → {b, c} → d
         let p = Pipeline::new("diamond")
-            .with_step(Step::new("a", StepType::LocalMl { model_id: "m".into() }))
-            .with_step(Step::new("b", StepType::Rule { rule_id: "r1".into() }).with_deps(["a"]))
-            .with_step(Step::new("c", StepType::Rule { rule_id: "r2".into() }).with_deps(["a"]))
-            .with_step(Step::new("d", StepType::LocalMl { model_id: "m2".into() }).with_deps(["b", "c"]));
+            .with_step(Step::new(
+                "a",
+                StepType::LocalMl {
+                    model_id: "m".into(),
+                },
+            ))
+            .with_step(
+                Step::new(
+                    "b",
+                    StepType::Rule {
+                        rule_id: "r1".into(),
+                    },
+                )
+                .with_deps(["a"]),
+            )
+            .with_step(
+                Step::new(
+                    "c",
+                    StepType::Rule {
+                        rule_id: "r2".into(),
+                    },
+                )
+                .with_deps(["a"]),
+            )
+            .with_step(
+                Step::new(
+                    "d",
+                    StepType::LocalMl {
+                        model_id: "m2".into(),
+                    },
+                )
+                .with_deps(["b", "c"]),
+            );
 
         let result = scheduler().execute(&p, &event("text")).await.unwrap();
         assert!(result.succeeded);
@@ -751,8 +829,21 @@ mod tests {
     #[tokio::test]
     async fn gate_step_always_true_passes() {
         let p = Pipeline::new("p")
-            .with_step(Step::new("g", StepType::Gate { condition: "always_true".into() }))
-            .with_step(Step::new("a", StepType::Rule { rule_id: "r".into() }).with_deps(["g"]));
+            .with_step(Step::new(
+                "g",
+                StepType::Gate {
+                    condition: "always_true".into(),
+                },
+            ))
+            .with_step(
+                Step::new(
+                    "a",
+                    StepType::Rule {
+                        rule_id: "r".into(),
+                    },
+                )
+                .with_deps(["g"]),
+            );
         let result = scheduler().execute(&p, &event("x")).await.unwrap();
         assert!(result.succeeded);
     }
@@ -761,7 +852,9 @@ mod tests {
     async fn gate_step_always_false_fails() {
         let p = Pipeline::new("p").with_step(Step::new(
             "g",
-            StepType::Gate { condition: "always_false".into() },
+            StepType::Gate {
+                condition: "always_false".into(),
+            },
         ));
         let err = scheduler().execute(&p, &event("x")).await.unwrap_err();
         assert!(matches!(err, MillwrightError::GateRejected { .. }));
@@ -770,7 +863,12 @@ mod tests {
     #[tokio::test]
     async fn gate_step_always_false_skips_with_policy() {
         let p = Pipeline::new("p")
-            .with_step(Step::new("g", StepType::Gate { condition: "always_false".into() }))
+            .with_step(Step::new(
+                "g",
+                StepType::Gate {
+                    condition: "always_false".into(),
+                },
+            ))
             .with_failure_policy(FailurePolicy::SkipAndContinue);
         let result = scheduler().execute(&p, &event("x")).await.unwrap();
         // Pipeline succeeds, step is skipped
@@ -787,13 +885,17 @@ mod tests {
         // Use a step with `requires_approval` — it will await a Channel gate
         // that is never resolved.  The 50ms pipeline-level timeout fires first
         // (GateEvaluator default is 30 s, so the pipeline timeout wins).
-        let mut config = MillwrightConfig::default();
-        config.default_timeout_ms = 50; // 50ms pipeline timeout
+        let config = MillwrightConfig {
+            default_timeout_ms: 50, // 50ms pipeline timeout
+            ..MillwrightConfig::default()
+        };
         let s = DagScheduler::new_noop(config);
 
         let blocking_step = Step::new(
             "blocking-approval",
-            StepType::LocalMl { model_id: "m".into() },
+            StepType::LocalMl {
+                model_id: "m".into(),
+            },
         )
         .with_approval("slack:#never-resolves");
 
@@ -819,10 +921,22 @@ mod tests {
     #[tokio::test]
     async fn output_is_last_completed_step() {
         let p = Pipeline::new("p")
-            .with_step(Step::new("first", StepType::Rule { rule_id: "r".into() }))
-            .with_step(Step::new("last", StepType::Llm {
-                prompt_template: "x".into(), max_tokens: 10,
-            }).with_deps(["first"]));
+            .with_step(Step::new(
+                "first",
+                StepType::Rule {
+                    rule_id: "r".into(),
+                },
+            ))
+            .with_step(
+                Step::new(
+                    "last",
+                    StepType::Llm {
+                        prompt_template: "x".into(),
+                        max_tokens: 10,
+                    },
+                )
+                .with_deps(["first"]),
+            );
         let result = scheduler().execute(&p, &event("x")).await.unwrap();
         // Output should come from "last" — the LLM step.
         assert!(result.output["response"].is_string());
@@ -834,19 +948,29 @@ mod tests {
     async fn python_call_step_returns_stub() {
         let p = Pipeline::new("p").with_step(Step::new(
             "py",
-            StepType::PythonCall { module: "my_module".into(), function: "run".into() },
+            StepType::PythonCall {
+                module: "my_module".into(),
+                function: "run".into(),
+            },
         ));
         let result = scheduler().execute(&p, &event("x")).await.unwrap();
-        assert!(result.step_results[0].output["stub"].as_bool().unwrap_or(false));
+        assert!(result.step_results[0].output["stub"]
+            .as_bool()
+            .unwrap_or(false));
     }
 
     #[tokio::test]
     async fn typescript_call_step_returns_stub() {
         let p = Pipeline::new("p").with_step(Step::new(
             "ts",
-            StepType::TypeScriptCall { adapter: "slack".into(), method: "send".into() },
+            StepType::TypeScriptCall {
+                adapter: "slack".into(),
+                method: "send".into(),
+            },
         ));
         let result = scheduler().execute(&p, &event("x")).await.unwrap();
-        assert!(result.step_results[0].output["stub"].as_bool().unwrap_or(false));
+        assert!(result.step_results[0].output["stub"]
+            .as_bool()
+            .unwrap_or(false));
     }
 }

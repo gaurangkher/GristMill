@@ -59,11 +59,17 @@ pub enum IpcRequest {
     /// Register a pipeline from its JSON serialisation.
     RegisterPipeline { pipeline_json: String },
     /// Run a registered pipeline with the given event.
-    RunPipeline { pipeline_id: String, event_json: String },
+    RunPipeline {
+        pipeline_id: String,
+        event_json: String,
+    },
     /// Return the ids of all registered pipelines.
     PipelineIds,
     /// Build a GristEvent from a channel string + payload JSON.
-    BuildEvent { channel: String, payload_json: String },
+    BuildEvent {
+        channel: String,
+        payload_json: String,
+    },
 }
 
 /// Wrapper that pairs a caller-chosen correlation id with a request.
@@ -86,11 +92,19 @@ pub struct IpcResponse {
 impl IpcResponse {
     fn ok(id: u32, value: impl Serialize) -> Self {
         let ok = serde_json::to_value(value).unwrap_or(Value::Null);
-        Self { id, ok: Some(ok), error: None }
+        Self {
+            id,
+            ok: Some(ok),
+            error: None,
+        }
     }
 
     fn err(id: u32, msg: impl Into<String>) -> Self {
-        Self { id, ok: None, error: Some(msg.into()) }
+        Self {
+            id,
+            ok: None,
+            error: Some(msg.into()),
+        }
     }
 }
 
@@ -170,30 +184,32 @@ async fn dispatch(core: &Arc<GristMillCore>, envelope: IpcEnvelope) -> IpcRespon
             }
         }
 
-        IpcRequest::RunPipeline { pipeline_id, event_json } => {
-            match serde_json::from_str::<GristEvent>(&event_json) {
-                Err(e) => IpcResponse::err(id, format!("invalid event JSON: {e}")),
-                Ok(event) => match core.run_pipeline(&pipeline_id, &event).await {
-                    Ok(result) => IpcResponse::ok(id, result),
-                    Err(e) => IpcResponse::err(id, e.to_string()),
-                },
-            }
-        }
+        IpcRequest::RunPipeline {
+            pipeline_id,
+            event_json,
+        } => match serde_json::from_str::<GristEvent>(&event_json) {
+            Err(e) => IpcResponse::err(id, format!("invalid event JSON: {e}")),
+            Ok(event) => match core.run_pipeline(&pipeline_id, &event).await {
+                Ok(result) => IpcResponse::ok(id, result),
+                Err(e) => IpcResponse::err(id, e.to_string()),
+            },
+        },
 
         IpcRequest::PipelineIds => IpcResponse::ok(id, core.pipeline_ids()),
 
-        IpcRequest::BuildEvent { channel, payload_json } => {
-            match serde_json::from_str::<Value>(&payload_json) {
-                Err(e) => IpcResponse::err(id, format!("invalid payload JSON: {e}")),
-                Ok(payload) => {
-                    let event = GristMillCore::build_event(&channel, payload);
-                    match serde_json::to_value(&event) {
-                        Ok(v) => IpcResponse::ok(id, v),
-                        Err(e) => IpcResponse::err(id, e.to_string()),
-                    }
+        IpcRequest::BuildEvent {
+            channel,
+            payload_json,
+        } => match serde_json::from_str::<Value>(&payload_json) {
+            Err(e) => IpcResponse::err(id, format!("invalid payload JSON: {e}")),
+            Ok(payload) => {
+                let event = GristMillCore::build_event(&channel, payload);
+                match serde_json::to_value(&event) {
+                    Ok(v) => IpcResponse::ok(id, v),
+                    Err(e) => IpcResponse::err(id, e.to_string()),
                 }
             }
-        }
+        },
     }
 }
 

@@ -163,7 +163,10 @@ impl GrindersSession {
                     InferenceOutput::tensor(Array1::zeros(n), 0)
                 } else {
                     InferenceOutput::text(
-                        format!("[stub:{model_id}] response for: {}", req.prompt.as_deref().unwrap_or("")),
+                        format!(
+                            "[stub:{model_id}] response for: {}",
+                            req.prompt.as_deref().unwrap_or("")
+                        ),
                         0,
                     )
                 }
@@ -193,18 +196,20 @@ fn run_onnx(
 ) -> Result<InferenceOutput, GrindersError> {
     use ort::inputs;
 
-    let features = req.features.as_ref().ok_or_else(|| GrindersError::OnnxInference {
-        model_id: model_id.to_owned(),
-        reason: "ONNX model requires feature tensor input".into(),
-    })?;
+    let features = req
+        .features
+        .as_ref()
+        .ok_or_else(|| GrindersError::OnnxInference {
+            model_id: model_id.to_owned(),
+            reason: "ONNX model requires feature tensor input".into(),
+        })?;
 
     let outputs = session
         .run(
-            inputs!["features" => features.view()]
-                .map_err(|e| GrindersError::OnnxInference {
-                    model_id: model_id.to_owned(),
-                    reason: e.to_string(),
-                })?,
+            inputs!["features" => features.view()].map_err(|e| GrindersError::OnnxInference {
+                model_id: model_id.to_owned(),
+                reason: e.to_string(),
+            })?,
         )
         .map_err(|e| GrindersError::OnnxInference {
             model_id: model_id.to_owned(),
@@ -217,15 +222,17 @@ fn run_onnx(
         .find_map(|&name| outputs.get(name))
         .ok_or_else(|| GrindersError::OnnxInference {
             model_id: model_id.to_owned(),
-            reason: "no recognised output tensor (tried: output, logits, embeddings, output_0)".into(),
+            reason: "no recognised output tensor (tried: output, logits, embeddings, output_0)"
+                .into(),
         })?;
 
-    let data = output_tensor
-        .try_extract_tensor::<f32>()
-        .map_err(|e| GrindersError::OnnxInference {
-            model_id: model_id.to_owned(),
-            reason: e.to_string(),
-        })?;
+    let data =
+        output_tensor
+            .try_extract_tensor::<f32>()
+            .map_err(|e| GrindersError::OnnxInference {
+                model_id: model_id.to_owned(),
+                reason: e.to_string(),
+            })?;
 
     let flat: Array1<f32> = data.iter().cloned().collect();
     Ok(InferenceOutput::tensor(flat, 0))
@@ -238,10 +245,13 @@ fn run_gguf(
     model_id: &str,
     max_tokens: usize,
 ) -> Result<InferenceOutput, GrindersError> {
-    let prompt = req.prompt.as_deref().ok_or_else(|| GrindersError::GgufInference {
-        model_id: model_id.to_owned(),
-        reason: "GGUF model requires a text prompt".into(),
-    })?;
+    let prompt = req
+        .prompt
+        .as_deref()
+        .ok_or_else(|| GrindersError::GgufInference {
+            model_id: model_id.to_owned(),
+            reason: "GGUF model requires a text prompt".into(),
+        })?;
     let text = ctx.generate(prompt, max_tokens)?;
     Ok(InferenceOutput::text(text, 0))
 }
@@ -258,7 +268,9 @@ mod tests {
     fn stub_session(id: &str) -> GrindersSession {
         GrindersSession {
             model_id: id.to_owned(),
-            kind: SessionKind::Stub { model_id: id.to_owned() },
+            kind: SessionKind::Stub {
+                model_id: id.to_owned(),
+            },
             timeout: std::time::Duration::from_secs(5),
             max_tokens: 128,
         }

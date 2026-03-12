@@ -49,7 +49,7 @@ pub enum ModelState {
 /// `session` is `ArcSwap<Option<Arc<GrindersSession>>>`:
 /// - `None`  → not yet loaded (cold).
 /// - `Some`  → loaded; the inner `Arc` is returned to callers so they can
-///             hold onto it while a concurrent hot-reload swaps in a new one.
+///   hold onto it while a concurrent hot-reload swaps in a new one.
 pub(crate) struct ModelEntry {
     pub config: ModelConfig,
     /// Live session — atomically swappable via ArcSwap (hot-reload, G-06).
@@ -173,7 +173,7 @@ impl ModelRegistry {
         guard
             .as_ref()
             .as_ref()
-            .map(|s| Arc::clone(s))
+            .map(Arc::clone)
             .ok_or_else(|| GrindersError::ModelLoadFailed {
                 model_id: model_id.to_owned(),
                 reason: "session is None immediately after load (bug)".into(),
@@ -196,9 +196,7 @@ impl ModelRegistry {
 
         let _guard = entry.load_lock.lock();
         let new_session = load_session(&entry.config)?;
-        entry
-            .session
-            .store(Arc::new(Some(Arc::new(new_session))));
+        entry.session.store(Arc::new(Some(Arc::new(new_session))));
         *entry.state.lock() = ModelState::Warm;
 
         let elapsed_ms = t0.elapsed().as_millis();
@@ -261,15 +259,10 @@ impl Default for ModelRegistry {
 fn load_and_store(entry: &ModelEntry) -> Result<(), GrindersError> {
     let t0 = Instant::now();
     let session = load_session(&entry.config)?;
-    entry
-        .session
-        .store(Arc::new(Some(Arc::new(session))));
+    entry.session.store(Arc::new(Some(Arc::new(session))));
     *entry.state.lock() = ModelState::Warm;
     let elapsed_ms = t0.elapsed().as_millis();
-    debug!(
-        model_id = entry.config.model_id,
-        elapsed_ms, "model loaded"
-    );
+    debug!(model_id = entry.config.model_id, elapsed_ms, "model loaded");
     metrics::counter!("grinders.registry.loads").increment(1);
     Ok(())
 }
@@ -324,7 +317,10 @@ mod tests {
         let r = ModelRegistry::new();
         r.register(dummy_config("test-warm-missing", true)).unwrap();
         let snaps = r.snapshot();
-        let snap = snaps.iter().find(|s| s.model_id == "test-warm-missing").unwrap();
+        let snap = snaps
+            .iter()
+            .find(|s| s.model_id == "test-warm-missing")
+            .unwrap();
         // Without the `onnx` feature the loader returns a Stub → Warm.
         // With the `onnx` feature but missing file → Failed.
         assert!(

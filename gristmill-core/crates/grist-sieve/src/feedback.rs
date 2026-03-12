@@ -28,13 +28,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use grist_event::GristEvent;
+#[allow(unused_imports)]
+use metrics;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc;
 use tracing::{error, info, instrument, warn};
 use ulid::Ulid;
-#[allow(unused_imports)]
-use metrics;
 
 use crate::cost_oracle::RouteDecision;
 use crate::error::SieveError;
@@ -129,10 +129,7 @@ impl FeedbackLog {
     pub fn open(dir: impl AsRef<Path>) -> Result<Self, SieveError> {
         let dir = dir.as_ref().to_path_buf();
         std::fs::create_dir_all(&dir).map_err(|e| {
-            SieveError::Feedback(format!(
-                "cannot create feedback dir {}: {e}",
-                dir.display()
-            ))
+            SieveError::Feedback(format!("cannot create feedback dir {}: {e}", dir.display()))
         })?;
 
         let (tx, rx) = mpsc::channel::<FeedbackRecord>(4096);
@@ -148,9 +145,7 @@ impl FeedbackLog {
     pub fn noop() -> Self {
         let (tx, mut rx) = mpsc::channel::<FeedbackRecord>(1);
         // Drain the channel to avoid blocking senders.
-        tokio::spawn(async move {
-            while rx.recv().await.is_some() {}
-        });
+        tokio::spawn(async move { while rx.recv().await.is_some() {} });
         Self {
             tx,
             records_sent: Arc::new(AtomicU64::new(0)),
@@ -237,21 +232,19 @@ async fn writer_task(
         }
 
         match file {
-            Ok(ref mut f) => {
-                match record.to_jsonl() {
-                    Ok(line) => {
-                        let bytes = format!("{line}\n");
-                        if let Err(e) = f.write_all(bytes.as_bytes()).await {
-                            warn!(error = %e, "failed to write feedback record");
-                        } else {
-                            records_written.fetch_add(1, Ordering::Relaxed);
-                        }
-                    }
-                    Err(e) => {
-                        warn!(error = %e, "failed to serialise feedback record");
+            Ok(ref mut f) => match record.to_jsonl() {
+                Ok(line) => {
+                    let bytes = format!("{line}\n");
+                    if let Err(e) = f.write_all(bytes.as_bytes()).await {
+                        warn!(error = %e, "failed to write feedback record");
+                    } else {
+                        records_written.fetch_add(1, Ordering::Relaxed);
                     }
                 }
-            }
+                Err(e) => {
+                    warn!(error = %e, "failed to serialise feedback record");
+                }
+            },
             Err(ref e) => {
                 warn!(error = %e, "feedback log file not open — dropping record");
             }
@@ -261,10 +254,7 @@ async fn writer_task(
     info!("feedback log writer shutting down");
 }
 
-async fn open_log_file(
-    dir: &Path,
-    date: &str,
-) -> Result<tokio::fs::File, std::io::Error> {
+async fn open_log_file(dir: &Path, date: &str) -> Result<tokio::fs::File, std::io::Error> {
     let path: PathBuf = dir.join(format!("feedback-{date}.jsonl"));
     tokio::fs::OpenOptions::new()
         .create(true)
@@ -344,8 +334,7 @@ mod tests {
     #[test]
     fn feedback_record_schema_fields_present() {
         let record = FeedbackRecord::new(&make_event(), &local_decision());
-        let json: serde_json::Value =
-            serde_json::from_str(&record.to_jsonl().unwrap()).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&record.to_jsonl().unwrap()).unwrap();
 
         for field in &[
             "event_id",

@@ -48,5 +48,8 @@ Thumbs.db
 .idea/
 *.swp
 
+# Claude Code
+.claude/
+
 # GristMill runtime
 *.sock

@@ -43,8 +43,8 @@ pub mod classifier;
 pub mod config;
 pub mod cost_oracle;
 pub mod error;
-pub mod feedback;
 pub mod features;
+pub mod feedback;
 
 // Re-exports for convenience.
 pub use cache::RoutingCache;
@@ -56,8 +56,6 @@ pub use features::FeatureExtractor;
 
 use grist_event::GristEvent;
 use tracing::{debug, info, instrument, warn};
-#[allow(unused_imports)]
-use metrics;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Sieve
@@ -222,10 +220,7 @@ mod tests {
     }
 
     fn event(text: &str) -> GristEvent {
-        GristEvent::new(
-            ChannelType::Http,
-            serde_json::json!({ "text": text }),
-        )
+        GristEvent::new(ChannelType::Http, serde_json::json!({ "text": text }))
     }
 
     // ── S-01: All 4 routes reachable ─────────────────────────────────────────
@@ -260,7 +255,10 @@ mod tests {
         sieve.triage(&e).await.unwrap(); // populate cache
         sieve.triage(&e).await.unwrap(); // should hit cache
         let stats = sieve.cache_stats();
-        assert!(stats.exact_hits >= 1, "expected at least one exact cache hit");
+        assert!(
+            stats.exact_hits >= 1,
+            "expected at least one exact cache hit"
+        );
     }
 
     // ── S-06: Feedback records are counted ───────────────────────────────────
@@ -277,10 +275,7 @@ mod tests {
     async fn expired_event_returns_error() {
         let sieve = sieve();
         // Set timestamp 10 seconds in the past so TTL=1ms is definitively expired.
-        let mut e = GristEvent::new(
-            ChannelType::Http,
-            serde_json::json!({ "text": "expired" }),
-        );
+        let mut e = GristEvent::new(ChannelType::Http, serde_json::json!({ "text": "expired" }));
         e.timestamp_ms = grist_event::current_timestamp_ms().saturating_sub(10_000);
         let e = e.with_ttl_ms(1);
         let result = sieve.triage(&e).await;
@@ -304,8 +299,10 @@ mod tests {
     // Must be async because Sieve::new() spawns a Tokio task for the feedback log.
     #[tokio::test]
     async fn custom_threshold_is_stored() {
-        let mut config = SieveConfig::default();
-        config.confidence_threshold = 0.70;
+        let config = SieveConfig {
+            confidence_threshold: 0.70,
+            ..SieveConfig::default()
+        };
         let sieve = Sieve::new(config).unwrap();
         assert!((sieve.confidence_threshold() - 0.70).abs() < 1e-5);
     }
@@ -325,8 +322,14 @@ mod tests {
     #[test]
     fn all_route_variants_serialise() {
         let decisions = vec![
-            RouteDecision::LocalMl { model_id: "m".into(), confidence: 0.9 },
-            RouteDecision::Rules { rule_id: "r".into(), confidence: 0.8 },
+            RouteDecision::LocalMl {
+                model_id: "m".into(),
+                confidence: 0.9,
+            },
+            RouteDecision::Rules {
+                rule_id: "r".into(),
+                confidence: 0.8,
+            },
             RouteDecision::Hybrid {
                 local_model: "m".into(),
                 llm_prompt_template: "t".into(),

@@ -43,6 +43,7 @@ pub enum ConfigError {
 /// from the YAML file will fall back to its defaults.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+#[derive(Default)]
 pub struct GristMillConfig {
     pub core: CoreConfig,
     pub sieve: SieveConfig,
@@ -52,21 +53,6 @@ pub struct GristMillConfig {
     pub ledger: LedgerConfig,
     pub bell_tower: BellTowerConfig,
     pub integrations: IntegrationsConfig,
-}
-
-impl Default for GristMillConfig {
-    fn default() -> Self {
-        Self {
-            core: CoreConfig::default(),
-            sieve: SieveConfig::default(),
-            grinders: GrindersConfig::default(),
-            hammer: HammerConfig::default(),
-            millwright: MillwrightConfig::default(),
-            ledger: LedgerConfig::default(),
-            bell_tower: BellTowerConfig::default(),
-            integrations: IntegrationsConfig::default(),
-        }
-    }
 }
 
 impl GristMillConfig {
@@ -187,20 +173,12 @@ impl Default for SieveConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+#[derive(Default)]
 pub struct GrindersConfig {
     /// Number of inference workers (0 = auto = CPU cores − 1).
     pub workers: usize,
     /// Per-model configuration map.
     pub models: std::collections::HashMap<String, ModelConfig>,
-}
-
-impl Default for GrindersConfig {
-    fn default() -> Self {
-        Self {
-            workers: 0,
-            models: std::collections::HashMap::new(),
-        }
-    }
 }
 
 /// Configuration for a single ML model entry under `grinders.models.*`.
@@ -240,6 +218,7 @@ impl Default for ModelConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+#[derive(Default)]
 pub struct HammerConfig {
     pub providers: HammerProvidersConfig,
     pub budget: HammerBudgetConfig,
@@ -247,31 +226,12 @@ pub struct HammerConfig {
     pub batch: HammerBatchConfig,
 }
 
-impl Default for HammerConfig {
-    fn default() -> Self {
-        Self {
-            providers: HammerProvidersConfig::default(),
-            budget: HammerBudgetConfig::default(),
-            cache: HammerCacheConfig::default(),
-            batch: HammerBatchConfig::default(),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+#[derive(Default)]
 pub struct HammerProvidersConfig {
     pub anthropic: AnthropicProviderConfig,
     pub ollama: OllamaProviderConfig,
-}
-
-impl Default for HammerProvidersConfig {
-    fn default() -> Self {
-        Self {
-            anthropic: AnthropicProviderConfig::default(),
-            ollama: OllamaProviderConfig::default(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -390,22 +350,12 @@ impl Default for MillwrightConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+#[derive(Default)]
 pub struct LedgerConfig {
     pub hot: LedgerHotConfig,
     pub warm: LedgerWarmConfig,
     pub cold: LedgerColdConfig,
     pub compaction: LedgerCompactionConfig,
-}
-
-impl Default for LedgerConfig {
-    fn default() -> Self {
-        Self {
-            hot: LedgerHotConfig::default(),
-            warm: LedgerWarmConfig::default(),
-            cold: LedgerColdConfig::default(),
-            compaction: LedgerCompactionConfig::default(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -482,38 +432,20 @@ impl Default for LedgerCompactionConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+#[derive(Default)]
 pub struct BellTowerConfig {
     pub channels: BellTowerChannels,
     pub quiet_hours: QuietHoursConfig,
     pub digest: DigestConfig,
 }
 
-impl Default for BellTowerConfig {
-    fn default() -> Self {
-        Self {
-            channels: BellTowerChannels::default(),
-            quiet_hours: QuietHoursConfig::default(),
-            digest: DigestConfig::default(),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+#[derive(Default)]
 pub struct BellTowerChannels {
     pub slack: SlackConfig,
     pub telegram: TelegramConfig,
     pub email: EmailConfig,
-}
-
-impl Default for BellTowerChannels {
-    fn default() -> Self {
-        Self {
-            slack: SlackConfig::default(),
-            telegram: TelegramConfig::default(),
-            email: EmailConfig::default(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -690,7 +622,10 @@ mod tests {
         assert_eq!(c.cache.max_entries, 50_000);
         assert_eq!(c.batch.window_ms, 5_000);
         assert_eq!(c.batch.max_batch_size, 10);
-        assert_eq!(c.providers.anthropic.default_model, "claude-sonnet-4-20250514");
+        assert_eq!(
+            c.providers.anthropic.default_model,
+            "claude-sonnet-4-20250514"
+        );
         assert_eq!(c.providers.ollama.model, "llama3.1:8b");
     }
 
@@ -747,7 +682,10 @@ mod tests {
         let c2: GristMillConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(c.core.log_level, c2.core.log_level);
         assert_eq!(c.hammer.budget.daily_tokens, c2.hammer.budget.daily_tokens);
-        assert_eq!(c.ledger.compaction.stale_days, c2.ledger.compaction.stale_days);
+        assert_eq!(
+            c.ledger.compaction.stale_days,
+            c2.ledger.compaction.stale_days
+        );
     }
 
     #[test]

@@ -46,7 +46,9 @@ pub fn load_gguf_session(config: &ModelConfig) -> Result<GrindersSession, Grinde
 
         Ok(GrindersSession {
             model_id: config.model_id.clone(),
-            kind: SessionKind::Stub { model_id: config.model_id.clone() },
+            kind: SessionKind::Stub {
+                model_id: config.model_id.clone(),
+            },
             timeout: config.timeout,
             max_tokens: config.max_tokens,
         })
@@ -79,14 +81,12 @@ fn load_gguf_real(config: &ModelConfig) -> Result<GrindersSession, GrindersError
     );
 
     // llama_cpp::LlamaModel is the entry point for the llama-cpp-2 crate.
-    let model = llama_cpp::LlamaModel::load_from_file(
-        &config.path,
-        llama_cpp::LlamaParams::default(),
-    )
-    .map_err(|e| GrindersError::ModelLoadFailed {
-        model_id: config.model_id.clone(),
-        reason: e.to_string(),
-    })?;
+    let model =
+        llama_cpp::LlamaModel::load_from_file(&config.path, llama_cpp::LlamaParams::default())
+            .map_err(|e| GrindersError::ModelLoadFailed {
+                model_id: config.model_id.clone(),
+                reason: e.to_string(),
+            })?;
 
     info!(model_id = config.model_id, "GGUF model loaded successfully");
     metrics::counter!("grinders.gguf.loads").increment(1);
