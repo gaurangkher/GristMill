@@ -1,16 +1,18 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Stage 1: Build Rust daemon (static musl binary)
+# Stage 1: Build Rust daemon
 # ─────────────────────────────────────────────────────────────────────────────
 FROM rust:latest AS rust-builder
 
-RUN apt-get update && apt-get install -y musl-tools && rm -rf /var/lib/apt/lists/*
-RUN rustup target add x86_64-unknown-linux-musl
+# Install C/C++ build tools needed by crates with native dependencies (usearch, etc.)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
 COPY gristmill-core/ ./gristmill-core/
 
 RUN cd gristmill-core && \
-    cargo build --release --target x86_64-unknown-linux-musl -p gristmill-daemon
+    cargo build --release -p gristmill-daemon
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 2: Build TypeScript shell
@@ -57,7 +59,7 @@ WORKDIR /app
 
 # Copy Rust daemon
 COPY --from=rust-builder \
-    /build/gristmill-core/target/x86_64-unknown-linux-musl/release/gristmill-daemon \
+    /build/gristmill-core/target/release/gristmill-daemon \
     /usr/local/bin/gristmill-daemon
 
 # Copy TypeScript shell build + production dependencies

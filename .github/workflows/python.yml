@@ -82,7 +82,12 @@ jobs:
           pip install -e ".[dev]"
       - name: Check feature vector dimension matches (392)
         run: |
-          RUST_DIM=$(grep -r "FEATURE_DIM\|feature_dim\|392" gristmill-core/crates/grist-sieve/src/ | grep -oP '\d+' | sort -u | tail -1)
+          # Extract EMBEDDING_DIM and METADATA_FEATURES from the Rust source individually,
+          # then sum them — avoids mis-parsing Rust type names like f32 as "32".
+          FEATURES_RS=gristmill-core/crates/grist-sieve/src/features.rs
+          EMBEDDING_DIM=$(grep 'pub const EMBEDDING_DIM' "$FEATURES_RS" | grep -oE '[0-9]+' | head -1)
+          METADATA_FEATURES=$(grep 'pub const METADATA_FEATURES' "$FEATURES_RS" | grep -oE '[0-9]+' | head -1)
+          RUST_DIM=$((EMBEDDING_DIM + METADATA_FEATURES))
           PY_DIM=$(python3 -c "from gristmill_ml.training.sieve_trainer import FEATURE_DIM; print(FEATURE_DIM)" 2>/dev/null || echo "392")
           echo "Rust feature dim: $RUST_DIM  |  Python feature dim: $PY_DIM"
           [ "$RUST_DIM" = "$PY_DIM" ] || (echo "Feature vector mismatch!" && exit 1)
