@@ -53,7 +53,9 @@ impl GristMillCore {
             Some(p) => {
                 GristMillConfig::load_from(p).map_err(|e| CoreError::config(e.to_string()))?
             }
-            None => GristMillConfig::default(),
+            // No explicit path → try the default ~/.gristmill/config.yaml.
+            // GristMillConfig::load() falls back to defaults if the file is missing.
+            None => GristMillConfig::load().map_err(|e| CoreError::config(e.to_string()))?,
         }
         .apply_env();
 

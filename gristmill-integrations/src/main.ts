@@ -30,6 +30,8 @@ import type { IBridge } from "./core/bridge.js";
 import { PluginRegistry } from "./plugins/registry.js";
 import { WatchEngine } from "./bell-tower/watch.js";
 import { startDashboard } from "./dashboard/server.js";
+import { SlackHopper } from "./hopper/slack.js";
+import { loadConfig } from "./core/config.js";
 
 // ── Bridge ─────────────────────────────────────────────────────────────────────
 
@@ -49,11 +51,14 @@ function resolveBridge(): IBridge {
 
 const bridge = resolveBridge();
 
+// ── Config ─────────────────────────────────────────────────────────────────────
+// Reads ~/.gristmill/config.yaml with env var overrides.
+
+const config = loadConfig();
+
 // ── Plugin registry ────────────────────────────────────────────────────────────
 
-const pluginsDir =
-  process.env["GRISTMILL_PLUGINS_DIR"] ??
-  path.join(os.homedir(), ".gristmill", "plugins");
+const pluginsDir = config.pluginsDir;
 
 const registry = new PluginRegistry();
 await registry.load(pluginsDir);
@@ -85,10 +90,31 @@ const watchPersistPath =
 const watchEngine = new WatchEngine();
 await watchEngine.loadFromFile(watchPersistPath);
 
+// ── Slack Socket Mode hopper (optional) ────────────────────────────────────────
+//
+// Activated when app_token + bot_token are set (config.yaml or env vars).
+// No public URL required — uses a persistent WebSocket to Slack's servers.
+
+let slackHopper: SlackHopper | null = null;
+
+if (config.slack.appToken && config.slack.botToken) {
+  slackHopper = new SlackHopper(bridge, {
+    appToken: config.slack.appToken,
+    botToken: config.slack.botToken,
+    replyMode: config.slack.replyMode,
+  });
+  await slackHopper.start();
+} else {
+  console.log(
+    "[SlackHopper] integrations.slack.app_token / bot_token not set — Slack Socket Mode disabled",
+  );
+}
+
 // ── Graceful shutdown ──────────────────────────────────────────────────────────
 
 async function shutdown(): Promise<void> {
   console.log("[main] Shutting down…");
+  await slackHopper?.stop().catch(() => {});
   await watchEngine.saveToFile(watchPersistPath).catch(() => {});
   await registry.unregisterAll().catch(() => {});
   process.exit(0);
@@ -108,8 +134,15 @@ const address = await startDashboard(bridge, {
   watchEngine,
   watchPersistPath,
   pluginRegistry: registry,
+  slackSigningSecret: config.slack.signingSecret || undefined,
 });
 
 console.log(`GristMill dashboard listening at ${address}`);
-console.log(`  /api/watches  — Watch CRUD`);
-console.log(`  /api/plugins  — Plugin status`);
+console.log(`  /api/watches       — Watch CRUD`);
+console.log(`  /api/plugins       — Plugin status`);
+console.log(`  /webhooks/slack    — Slack Events API inbound (HTTP, optional)`);
+console.log(
+  slackHopper
+    ? `  [SlackHopper]      — Socket Mode active`
+    : `  [SlackHopper]      — disabled (set SLACK_APP_TOKEN + SLACK_BOT_TOKEN to enable)`,
+);

@@ -44,30 +44,37 @@ const MAX_FRAME_BYTES = 16 * 1024 * 1024;
 // Mirrors grist_core::parse_channel and GristEvent::new in Rust so we can
 // build valid GristEvent JSON without a daemon round-trip.
 
+// Rust ChannelType uses #[serde(tag = "type", rename_all = "snake_case")].
+// Unit variants → { type: "variant_name" }
+// Struct variants → { type: "variant_name", field: value, ... }
 function toChannelSource(channel: string): unknown {
   switch (channel.toLowerCase()) {
-    case "http":        return "Http";
-    case "websocket":   return "WebSocket";
-    case "cli":         return "Cli";
-    case "cron":        return "Cron";
-    case "webhook":     return { Webhook: { provider: "generic" } };
-    case "mq":          return { MessageQueue: { topic: "default" } };
-    case "fs":          return { FileSystem: { path: "/" } };
-    case "python":      return { Python: { callback_id: "default" } };
-    case "typescript":  return { TypeScript: { adapter_id: "default" } };
-    case "internal":    return { Internal: { subsystem: "core" } };
-    default:            return "Cli";
+    case "http":        return { type: "http" };
+    case "websocket":   return { type: "web_socket" };
+    case "cli":         return { type: "cli" };
+    case "cron":        return { type: "cron" };
+    case "webhook":     return { type: "webhook", provider: "generic" };
+    case "mq":          return { type: "message_queue", topic: "default" };
+    case "fs":          return { type: "file_system", path: "/" };
+    case "python":      return { type: "python", callback_id: "default" };
+    case "typescript":  return { type: "type_script", adapter_id: "default" };
+    // Slack events arrive via the TypeScript shell — use TypeScript adapter variant
+    case "slack":       return { type: "type_script", adapter_id: "slack" };
+    case "internal":    return { type: "internal", subsystem: "core" };
+    // Any other adapter registered via the plugin system
+    default:            return { type: "type_script", adapter_id: channel };
   }
 }
 
-function buildEvent(channel: string, payload: unknown): string {
+function buildEvent(channel: string, payload: unknown, priority = "normal"): string {
   return JSON.stringify({
     id: ulid(),
     source: toChannelSource(channel),
     timestamp_ms: Date.now(),
     payload,
     metadata: {
-      priority: "Normal",
+      // Rust Priority uses #[serde(rename_all = "lowercase")] → "normal", "high", etc.
+      priority: priority.toLowerCase(),
       correlation_id: null,
       reply_channel: null,
       ttl_ms: null,
@@ -188,7 +195,7 @@ export class IpcBridge implements IBridge {
   async triage(event: GristEventInit): Promise<RouteDecision> {
     const result = await this.send({
       method: "triage",
-      params: { event_json: this.buildEventJson(event.channel, event.payload) },
+      params: { event_json: this.buildEventJson(event.channel, event.payload, event.priority) },
     });
     return result as RouteDecision;
   }
@@ -240,7 +247,7 @@ export class IpcBridge implements IBridge {
       method: "run_pipeline",
       params: {
         pipeline_id: pipelineId,
-        event_json: this.buildEventJson(event.channel, event.payload),
+        event_json: this.buildEventJson(event.channel, event.payload, event.priority),
       },
     });
     return result as PipelineResult;
@@ -258,8 +265,8 @@ export class IpcBridge implements IBridge {
     return result as string[];
   }
 
-  buildEventJson(channel: string, payload: unknown): string {
-    return buildEvent(channel, payload);
+  buildEventJson(channel: string, payload: unknown, priority?: string): string {
+    return buildEvent(channel, payload, priority);
   }
 
   // subscribe() over the Unix socket would require a separate streaming
