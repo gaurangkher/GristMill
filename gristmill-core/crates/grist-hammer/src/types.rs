@@ -67,7 +67,11 @@ impl EscalationRequest {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Response from an LLM escalation.
+///
+/// Fields are serialised in **camelCase** so the IPC wire format matches the
+/// TypeScript `EscalationResult` interface directly (no client-side mapping needed).
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct EscalationResponse {
     /// Mirrors `EscalationRequest::id`.
     pub request_id: String,
