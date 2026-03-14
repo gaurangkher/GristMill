@@ -110,6 +110,10 @@ impl GristMillConfig {
         env_override!("TELEGRAM_CHAT_ID"                       => self.bell_tower.channels.telegram.chat_id);
         env_override!("EMAIL_USER"                             => self.bell_tower.channels.email.username);
         env_override!("EMAIL_PASS"                             => self.bell_tower.channels.email.password);
+        env_override!("SLACK_APP_TOKEN"                        => self.integrations.slack.app_token);
+        env_override!("SLACK_BOT_TOKEN"                        => self.integrations.slack.bot_token);
+        env_override!("SLACK_SIGNING_SECRET"                   => self.integrations.slack.signing_secret);
+        env_override!("SLACK_REPLY_MODE"                       => self.integrations.slack.reply_mode);
         self
     }
 }
@@ -545,6 +549,8 @@ impl Default for DigestConfig {
 pub struct IntegrationsConfig {
     pub dashboard: DashboardConfig,
     pub plugins_dir: PathBuf,
+    /// Slack inbound integration (Socket Mode + HTTP Events API).
+    pub slack: SlackIntegrationConfig,
 }
 
 impl Default for IntegrationsConfig {
@@ -552,6 +558,7 @@ impl Default for IntegrationsConfig {
         Self {
             dashboard: DashboardConfig::default(),
             plugins_dir: PathBuf::from("./plugins"),
+            slack: SlackIntegrationConfig::default(),
         }
     }
 }
@@ -568,6 +575,43 @@ impl Default for DashboardConfig {
         Self {
             enabled: true,
             port: 8420,
+        }
+    }
+}
+
+/// Configuration for Slack inbound integration.
+///
+/// ```yaml
+/// integrations:
+///   slack:
+///     app_token: "xapp-..."        # Socket Mode (connections:write scope)
+///     bot_token: "xoxb-..."        # Bot OAuth token (for replies)
+///     signing_secret: "..."        # HTTP Events API request verification
+///     reply_mode: "thread"         # "thread" | "off"
+/// ```
+///
+/// Tokens can also be supplied via env vars (`SLACK_APP_TOKEN`, etc.) which
+/// take precedence over the YAML values when `apply_env()` is called.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SlackIntegrationConfig {
+    /// App-level token (`xapp-…`) — required for Socket Mode.
+    pub app_token: String,
+    /// Bot OAuth token (`xoxb-…`) — required for posting replies.
+    pub bot_token: String,
+    /// Signing secret — used to verify HTTP Events API requests.
+    pub signing_secret: String,
+    /// Reply mode: `"thread"` (default) or `"off"`.
+    pub reply_mode: String,
+}
+
+impl Default for SlackIntegrationConfig {
+    fn default() -> Self {
+        Self {
+            app_token: std::env::var("SLACK_APP_TOKEN").unwrap_or_default(),
+            bot_token: std::env::var("SLACK_BOT_TOKEN").unwrap_or_default(),
+            signing_secret: std::env::var("SLACK_SIGNING_SECRET").unwrap_or_default(),
+            reply_mode: "thread".to_string(),
         }
     }
 }

@@ -27,6 +27,7 @@ import { metricsRoutes } from "./routes/metrics.js";
 import { triageRoutes } from "./routes/triage.js";
 import { watchesRoutes } from "./routes/watches.js";
 import { pluginsRoutes } from "./routes/plugins.js";
+import { slackWebhookRoutes } from "./routes/slack-webhook.js";
 
 export interface DashboardConfig {
   /** Port to listen on. Default: 4000 */
@@ -37,6 +38,13 @@ export interface DashboardConfig {
   corsOrigins?: string[];
   /** Path to the built React SPA `dist/` directory. */
   uiDistPath?: string;
+  /**
+   * Slack signing secret for inbound webhook verification.
+   * When set, mounts POST /webhooks/slack with HMAC-SHA256 verification.
+   * Source: your Slack app → Basic Information → App Credentials → Signing Secret.
+   * Pass via SLACK_SIGNING_SECRET env var — never hardcode.
+   */
+  slackSigningSecret?: string;
   /**
    * When provided, mounts the Watch CRUD API at `/api/watches`.
    * Should be the same `WatchEngine` instance given to `NotificationDispatcher`.
@@ -112,6 +120,14 @@ export function createDashboardServer(
       prefix: "/api/plugins",
     });
   }
+
+  // Slack inbound webhook — POST /webhooks/slack
+  // Always mounted; signature verification activates when slackSigningSecret is set.
+  app.register(slackWebhookRoutes, {
+    bridge,
+    signingSecret: config.slackSigningSecret,
+    prefix: "/webhooks/slack",
+  });
 
   // SPA static files (optional — only if the build output exists)
   const uiDist =

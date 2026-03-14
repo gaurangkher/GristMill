@@ -18,6 +18,8 @@
     "@fastify/cors": "^9.0.1",
     "@fastify/static": "^7.0.4",
     "@msgpack/msgpack": "^3.1.3",
+    "@slack/socket-mode": "^2.0.6",
+    "@slack/web-api": "^7.15.0",
     "fastify": "^4.28.1",
     "nodemailer": "^6.9.13",
     "ulid": "^2.3.0",
