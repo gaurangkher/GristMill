@@ -148,9 +148,7 @@ impl Provider {
     /// may be inserted into the distillation training buffer.
     pub fn provider_type(self) -> ProviderType {
         match self {
-            Provider::AnthropicPrimary | Provider::AnthropicFallback => {
-                ProviderType::CommercialApi
-            }
+            Provider::AnthropicPrimary | Provider::AnthropicFallback => ProviderType::CommercialApi,
             Provider::Ollama => ProviderType::LocalOpenSource,
             Provider::Cache => ProviderType::Cache,
         }

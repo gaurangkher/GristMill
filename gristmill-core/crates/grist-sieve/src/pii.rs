@@ -25,8 +25,8 @@ use regex::Regex;
 struct PiiPatterns {
     email: Regex,
     phone: Regex,
-    ssn:   Regex,
-    card:  Regex,
+    ssn: Regex,
+    card: Regex,
 }
 
 static PATTERNS: OnceLock<PiiPatterns> = OnceLock::new();
@@ -34,25 +34,18 @@ static PATTERNS: OnceLock<PiiPatterns> = OnceLock::new();
 fn patterns() -> &'static PiiPatterns {
     PATTERNS.get_or_init(|| PiiPatterns {
         // Email: local@domain.tld
-        email: Regex::new(
-            r"(?i)[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}"
-        ).expect("email regex"),
+        email: Regex::new(r"(?i)[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}").expect("email regex"),
 
         // Phone: +1 (555) 555-5555, 555-555-5555, (555) 555 5555, etc.
-        phone: Regex::new(
-            r"(?:\+?1[\s.\-]?)?(?:\(?\d{3}\)?[\s.\-]?\d{3}[\s.\-]?\d{4})"
-        ).expect("phone regex"),
+        phone: Regex::new(r"(?:\+?1[\s.\-]?)?(?:\(?\d{3}\)?[\s.\-]?\d{3}[\s.\-]?\d{4})")
+            .expect("phone regex"),
 
         // SSN: 123-45-6789 or 123 45 6789
-        ssn: Regex::new(
-            r"\b\d{3}[- ]\d{2}[- ]\d{4}\b"
-        ).expect("ssn regex"),
+        ssn: Regex::new(r"\b\d{3}[- ]\d{2}[- ]\d{4}\b").expect("ssn regex"),
 
         // Card: 13-19 digit number with optional spaces/dashes between groups
         // Matches Visa (16), Mastercard (16), Amex (15), Discover (16), etc.
-        card: Regex::new(
-            r"\b(?:\d[ \-]?){13,19}\b"
-        ).expect("card regex"),
+        card: Regex::new(r"\b(?:\d[ \-]?){13,19}\b").expect("card regex"),
     })
 }
 
@@ -87,7 +80,10 @@ mod tests {
     #[test]
     fn scrubs_email() {
         let out = scrub("Contact me at alice@example.com please.");
-        assert!(!out.contains("alice@example.com"), "email should be redacted");
+        assert!(
+            !out.contains("alice@example.com"),
+            "email should be redacted"
+        );
         assert!(out.contains("[EMAIL]"), "expected [EMAIL] placeholder");
     }
 

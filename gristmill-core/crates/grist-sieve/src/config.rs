@@ -55,9 +55,12 @@ pub struct SieveConfig {
 impl Default for SieveConfig {
     fn default() -> Self {
         // Resolve default training buffer path to ~/.gristmill/db/
-        let training_buffer_path = std::env::var("HOME")
-            .ok()
-            .map(|h| PathBuf::from(h).join(".gristmill").join("db").join("training_buffer.sqlite"));
+        let training_buffer_path = std::env::var("HOME").ok().map(|h| {
+            PathBuf::from(h)
+                .join(".gristmill")
+                .join("db")
+                .join("training_buffer.sqlite")
+        });
 
         Self {
             model_path: None,

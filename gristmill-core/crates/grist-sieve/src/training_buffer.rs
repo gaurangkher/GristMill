@@ -78,7 +78,7 @@ pub struct TrainingRecord {
 }
 
 /// Distillation training record domain classification.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DomainTag {
     Code,
@@ -86,25 +86,20 @@ pub enum DomainTag {
     Reasoning,
     Qa,
     Creative,
+    #[default]
     Other,
 }
 
 impl DomainTag {
     pub fn as_str(self) -> &'static str {
         match self {
-            DomainTag::Code      => "code",
-            DomainTag::Writing   => "writing",
+            DomainTag::Code => "code",
+            DomainTag::Writing => "writing",
             DomainTag::Reasoning => "reasoning",
-            DomainTag::Qa        => "qa",
-            DomainTag::Creative  => "creative",
-            DomainTag::Other     => "other",
+            DomainTag::Qa => "qa",
+            DomainTag::Creative => "creative",
+            DomainTag::Other => "other",
         }
-    }
-}
-
-impl Default for DomainTag {
-    fn default() -> Self {
-        DomainTag::Other
     }
 }
 
@@ -126,9 +121,9 @@ pub enum RecordStatus {
 impl RecordStatus {
     pub fn as_str(self) -> &'static str {
         match self {
-            RecordStatus::Pending    => "PENDING",
+            RecordStatus::Pending => "PENDING",
             RecordStatus::InTraining => "IN_TRAINING",
-            RecordStatus::Consumed   => "CONSUMED",
+            RecordStatus::Consumed => "CONSUMED",
         }
     }
 }
@@ -150,7 +145,7 @@ struct WriteCmd(TrainingRecord);
 /// until the last `TrainingBuffer` handle is dropped.
 #[derive(Debug, Clone)]
 pub struct TrainingBuffer {
-    tx:             mpsc::Sender<WriteCmd>,
+    tx: mpsc::Sender<WriteCmd>,
     records_queued: Arc<AtomicU64>,
 }
 
@@ -175,9 +170,8 @@ impl TrainingBuffer {
         // Open connection synchronously to run schema migrations before
         // handing control to the background task.
         {
-            let conn = Connection::open(&db_path).map_err(|e| {
-                SieveError::Feedback(format!("cannot open training buffer: {e}"))
-            })?;
+            let conn = Connection::open(&db_path)
+                .map_err(|e| SieveError::Feedback(format!("cannot open training buffer: {e}")))?;
             init_schema(&conn).map_err(|e| {
                 SieveError::Feedback(format!("training buffer schema init failed: {e}"))
             })?;
@@ -357,15 +351,15 @@ pub fn build_record(
     provider_type: impl Into<String>,
 ) -> TrainingRecord {
     TrainingRecord {
-        record_id:        Ulid::new().to_string(),
-        timestamp:        chrono::Utc::now().to_rfc3339(),
-        query_text:       query_text.into(),
+        record_id: Ulid::new().to_string(),
+        timestamp: chrono::Utc::now().to_rfc3339(),
+        query_text: query_text.into(),
         teacher_response: teacher_response.into(),
         grinder_response,
         confidence_score,
         domain_tag,
-        teacher_logits:   None,
-        provider_type:    provider_type.into(),
+        teacher_logits: None,
+        provider_type: provider_type.into(),
     }
 }
 
@@ -412,7 +406,11 @@ mod tests {
         buf.insert(commercial_record());
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
         // Commercial records must not increment the queued counter.
-        assert_eq!(buf.records_queued(), 0, "commercial record should be blocked");
+        assert_eq!(
+            buf.records_queued(),
+            0,
+            "commercial record should be blocked"
+        );
     }
 
     #[tokio::test]
@@ -470,9 +468,7 @@ mod tests {
 
         let conn = Connection::open(&db_path).unwrap();
         let cols: Vec<String> = {
-            let mut stmt = conn
-                .prepare("PRAGMA table_info(training_records)")
-                .unwrap();
+            let mut stmt = conn.prepare("PRAGMA table_info(training_records)").unwrap();
             stmt.query_map([], |row| row.get::<_, String>(1))
                 .unwrap()
                 .filter_map(|r| r.ok())
@@ -480,9 +476,17 @@ mod tests {
         };
 
         for expected in &[
-            "record_id", "timestamp", "query_text", "teacher_response",
-            "grinder_response", "confidence_score", "domain_tag",
-            "teacher_logits", "status", "in_retention", "provider_type",
+            "record_id",
+            "timestamp",
+            "query_text",
+            "teacher_response",
+            "grinder_response",
+            "confidence_score",
+            "domain_tag",
+            "teacher_logits",
+            "status",
+            "in_retention",
+            "provider_type",
         ] {
             assert!(
                 cols.iter().any(|c| c == expected),
