@@ -25,6 +25,7 @@ import { pipelinesRoutes } from "./routes/pipelines.js";
 import { memoryRoutes } from "./routes/memory.js";
 import { metricsRoutes } from "./routes/metrics.js";
 import { triageRoutes } from "./routes/triage.js";
+import { trainerRoutes } from "./routes/trainer.js";
 import { watchesRoutes } from "./routes/watches.js";
 import { pluginsRoutes } from "./routes/plugins.js";
 import { slackWebhookRoutes } from "./routes/slack-webhook.js";
@@ -103,6 +104,8 @@ export function createDashboardServer(
   app.register(memoryRoutes,    { bridge, prefix: "/api/memory" });
   app.register(metricsRoutes,   { bridge, prefix: "/api/metrics" });
   app.register(triageRoutes,    { bridge, prefix: "/api/triage" });
+  // API routes — distillation trainer (proxies to localhost:7432)
+  app.register(trainerRoutes,   { prefix: "/api/trainer" });
 
   // API routes — watches (optional, requires watchEngine)
   if (config.watchEngine) {

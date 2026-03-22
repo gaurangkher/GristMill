@@ -13,6 +13,7 @@
 //!   2. Built-in defaults (no file needed for dev / tests)
 
 mod ipc;
+mod trainer_socket;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -90,6 +91,14 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
+    // ── Trainer socket subscriber (background task) ───────────────────────────
+    // Subscribes to gristmill-trainer's Unix socket and triggers adapter
+    // hot-reload whenever a checkpoint_promoted message is received.
+    let reload_notify = Arc::new(tokio::sync::Notify::new());
+    let trainer_sock_path = trainer_socket::resolve_sock_path();
+    info!(sock = %trainer_sock_path.display(), "subscribing to trainer.sock (exponential backoff reconnect)");
+    let trainer_handle = trainer_socket::spawn(trainer_sock_path, Arc::clone(&reload_notify));
+
     info!("GristMill daemon ready — press Ctrl+C to stop");
     info!(socket = %socket_path.display(), "IPC socket");
 
@@ -117,5 +126,6 @@ async fn main() -> anyhow::Result<()> {
 
     server_handle.abort();
     heartbeat_handle.abort();
+    trainer_handle.abort();
     Ok(())
 }

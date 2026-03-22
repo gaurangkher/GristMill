@@ -24,6 +24,11 @@ dependencies = [
     "accelerate>=0.28",
     "evaluate>=0.4",
     "seqeval>=1.2",
+    # Phase 2 — distillation trainer
+    "peft>=0.10",
+    "trl>=0.8",
+    "fastapi>=0.111",
+    "uvicorn[standard]>=0.29",
 ]
 
 [project.optional-dependencies]
@@ -37,6 +42,7 @@ dev = [
 gristmill-train-sieve = "gristmill_ml.training.sieve_trainer:main"
 gristmill-export      = "gristmill_ml.export.onnx_export:main"
 gristmill-validate    = "gristmill_ml.export.validate:main"
+gristmill-trainer     = "gristmill_ml.trainer.__main__:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/gristmill_ml"]
