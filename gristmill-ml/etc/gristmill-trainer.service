@@ -1,0 +1,30 @@
+[Unit]
+Description=GristMill Distillation Trainer
+Documentation=https://github.com/gaurangkher/GristMill
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/gristmill-trainer
+Restart=on-failure
+RestartSec=30s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=gristmill-trainer
+
+# Run as the installing user (override with User= if needed)
+# User=gristmill
+
+# Environment
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/etc/gristmill/trainer.env
+
+# Resource limits — prevent OOM from killing other processes
+MemoryMax=90%
+LimitNOFILE=65536
+
+# Working directory for relative paths
+WorkingDirectory=/var/lib/gristmill
+
+[Install]
+WantedBy=multi-user.target
