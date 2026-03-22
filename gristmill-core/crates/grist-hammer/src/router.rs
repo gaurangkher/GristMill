@@ -1,9 +1,14 @@
 //! Provider routing for grist-hammer.
 //!
 //! [`RequestRouter`] attempts providers in priority order:
-//!   1. Anthropic primary model
-//!   2. Anthropic fallback model
-//!   3. Ollama
+//!   1. **Ollama** (local open-source — eligible for training buffer)
+//!   2. Anthropic primary model (commercial — NOT eligible for training buffer)
+//!   3. Anthropic fallback model (commercial — NOT eligible for training buffer)
+//!
+//! **Rationale:** Per the GristMill distillation spec, commercial API outputs
+//! must never be written to the training buffer (ToS violation).  By placing
+//! Ollama first, the system maximises training signal from local open-source
+//! responses and only falls back to Anthropic when Ollama is unavailable.
 //!
 //! On each provider failure a warning is logged and the next provider is tried.
 //! If all fail, [`HammerError::AllProvidersFailed`] is returned.
@@ -139,6 +144,7 @@ impl RequestRouter {
                         return Ok(EscalationResponse {
                             request_id: req.id.clone(),
                             content,
+                            provider_type: provider.provider_type(),
                             provider,
                             cache_hit: false,
                             tokens_used: tokens,
@@ -155,12 +161,22 @@ impl RequestRouter {
         }
 
         // ── Production path ───────────────────────────────────────────────
+        // Priority order: Ollama (local, training-eligible) → Anthropic primary
+        // → Anthropic fallback.  See module-level doc for rationale.
+
+        // 1. Try Ollama first (local open-source — training buffer eligible).
+        match self.call_ollama(req).await {
+            Ok(resp) => return Ok(self.make_response(req, resp, Provider::Ollama, start)),
+            Err(e) => {
+                warn!(provider = "ollama", error = %e, "Ollama unavailable, falling back to Anthropic primary");
+            }
+        }
+
+        // 2. Try Anthropic primary (commercial — NOT written to training buffer).
         let model = req
             .model_override
             .as_deref()
             .unwrap_or(&self.config.providers.anthropic.default_model);
-
-        // Try Anthropic primary.
         match self
             .call_anthropic(req, model, Provider::AnthropicPrimary)
             .await
@@ -169,29 +185,19 @@ impl RequestRouter {
                 return Ok(self.make_response(req, resp, Provider::AnthropicPrimary, start))
             }
             Err(e) => {
-                warn!(provider = "anthropic_primary", error = %e, "provider failed, trying fallback");
+                warn!(provider = "anthropic_primary", error = %e, "provider failed, trying Anthropic fallback");
             }
         }
 
-        // Try Anthropic fallback model.
+        // 3. Try Anthropic fallback model (commercial — NOT written to training buffer).
         let fallback = &self.config.providers.anthropic.fallback_model.clone();
         match self
             .call_anthropic(req, fallback, Provider::AnthropicFallback)
             .await
         {
-            Ok(resp) => {
-                return Ok(self.make_response(req, resp, Provider::AnthropicFallback, start))
-            }
+            Ok(resp) => Ok(self.make_response(req, resp, Provider::AnthropicFallback, start)),
             Err(e) => {
-                warn!(provider = "anthropic_fallback", error = %e, "provider failed, trying Ollama");
-            }
-        }
-
-        // Try Ollama.
-        match self.call_ollama(req).await {
-            Ok(resp) => Ok(self.make_response(req, resp, Provider::Ollama, start)),
-            Err(e) => {
-                warn!(provider = "ollama", error = %e, "all providers failed");
+                warn!(provider = "anthropic_fallback", error = %e, "all providers failed");
                 Err(HammerError::AllProvidersFailed(e.to_string()))
             }
         }
@@ -294,6 +300,7 @@ impl RequestRouter {
         EscalationResponse {
             request_id: req.id.clone(),
             content: result.0,
+            provider_type: provider.provider_type(),
             provider,
             cache_hit: false,
             tokens_used: result.1,

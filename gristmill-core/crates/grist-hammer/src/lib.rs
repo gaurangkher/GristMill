@@ -31,7 +31,7 @@ use router::RequestRouter;
 
 pub use config::HammerConfig;
 pub use error::HammerError;
-pub use types::{BudgetInfo, EscalationRequest, EscalationResponse, Provider};
+pub use types::{BudgetInfo, EscalationRequest, EscalationResponse, Provider, ProviderType};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Hammer
@@ -94,6 +94,7 @@ impl Hammer {
             debug!(request_id = %req.id, "cache exact hit");
             return Ok(EscalationResponse {
                 cache_hit: true,
+                provider_type: types::ProviderType::Cache,
                 request_id: req.id,
                 ..cached
             });
@@ -103,6 +104,7 @@ impl Hammer {
                 debug!(request_id = %req.id, "cache fuzzy hit");
                 return Ok(EscalationResponse {
                     cache_hit: true,
+                    provider_type: types::ProviderType::Cache,
                     request_id: req.id,
                     ..cached
                 });
