@@ -118,10 +118,20 @@ fn handle_message(json: &str, reload: ReloadNotify) {
                 .get("record_count")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0);
+            // Phase 3: domain-aware hot-reload.
+            // The trainer now includes a `domain` field (e.g. "code", "writing",
+            // "default") so the daemon can target a specific domain adapter model
+            // via `Grinders::hot_reload(&domain_model_id(domain))`.
+            let domain = value
+                .get("domain")
+                .and_then(|v| v.as_str())
+                .unwrap_or("default")
+                .to_owned();
             info!(
                 version = version,
                 validation_score = score,
                 record_count = records,
+                domain = %domain,
                 "Checkpoint promoted — triggering adapter hot-reload"
             );
             reload.notify_waiters();

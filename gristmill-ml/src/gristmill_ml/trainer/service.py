@@ -73,6 +73,8 @@ class CycleSummary:
     duration_minutes: float
     validation_score: float
     rolled_back: bool
+    domain: str = "default"
+    teacher_cost_usd: float = 0.0
     error: Optional[str] = None
 
 
@@ -87,6 +89,12 @@ class ServiceState:
     paused_reason: Optional[str] = None
     uptime_seconds: float = 0.0
     last_heartbeat_seen: Optional[str] = None
+    teacher_cost_usd_total: float = 0.0
+    domains: dict = None
+
+    def __post_init__(self) -> None:
+        if self.domains is None:
+            self.domains = {}
 
 
 class GristMillTrainerService:
@@ -127,6 +135,10 @@ class GristMillTrainerService:
         self._cycle_history: list[CycleSummary] = []
         self._latest_validation: Optional[dict] = None
         self._lock = asyncio.Lock()
+        # Phase 3: per-domain cost tracking and active-cycle guard.
+        self._teacher_cost_usd_total: float = 0.0
+        self._cost_by_domain: dict[str, float] = {}
+        self._active_domains: set[str] = set()  # domains currently in a cycle
 
     # ── Main event loop entry ─────────────────────────────────────────────────
 
@@ -146,41 +158,62 @@ class GristMillTrainerService:
         async with self._lock:
             if self._state == TrainerState.PAUSED:
                 return
-            if self._state not in (TrainerState.IDLE, TrainerState.WAITING):
-                return  # Another coroutine is running the cycle
-            if not self._trigger_condition_met():
-                self._state = TrainerState.IDLE
+
+            # Phase 3: check trigger condition per domain and spawn per-domain cycles.
+            from gristmill_ml.trainer.checkpoint import KNOWN_DOMAINS
+
+            triggered_domains = [
+                d
+                for d in KNOWN_DOMAINS
+                if d not in self._active_domains and self._trigger_condition_met(domain=d)
+            ]
+
+            if not triggered_domains:
+                if not self._active_domains:
+                    self._state = TrainerState.IDLE
                 return
+
             if not await self._resource_gate_ok():
                 if self._state != TrainerState.WAITING:
                     self._state = TrainerState.WAITING
                     logger.info("Trigger met but resource gate blocked — WAITING")
                 return
-            # All conditions met — start a cycle
-            asyncio.create_task(self._run_cycle())
+
+            for domain in triggered_domains:
+                self._active_domains.add(domain)
+                asyncio.create_task(self._run_cycle(domain=domain))
 
     # ── Trigger condition ─────────────────────────────────────────────────────
 
-    def _trigger_condition_met(self) -> bool:
-        pending = self._count_pending()
+    def _trigger_condition_met(self, domain: str = "default") -> bool:
+        pending = self._count_pending(domain=domain)
         if pending >= PENDING_TRIGGER:
-            logger.debug("Trigger: %d pending records >= %d", pending, PENDING_TRIGGER)
+            logger.debug("Trigger [%s]: %d pending records >= %d", domain, pending, PENDING_TRIGGER)
             return True
         if self._last_cycle_at is not None:
             days_since = (time.time() - self._last_cycle_at) / 86400
             if days_since >= CYCLE_CADENCE_DAYS:
                 logger.debug(
-                    "Trigger: %.1f days since last cycle >= %d", days_since, CYCLE_CADENCE_DAYS
+                    "Trigger [%s]: %.1f days since last cycle >= %d",
+                    domain,
+                    days_since,
+                    CYCLE_CADENCE_DAYS,
                 )
                 return True
         return False
 
-    def _count_pending(self) -> int:
+    def _count_pending(self, domain: str = "default") -> int:
         try:
             conn = sqlite3.connect(str(self.training_db_path))
-            count = conn.execute(
-                "SELECT COUNT(*) FROM training_records WHERE status='PENDING'"
-            ).fetchone()[0]
+            if domain == "default":
+                count = conn.execute(
+                    "SELECT COUNT(*) FROM training_records WHERE status='PENDING'"
+                ).fetchone()[0]
+            else:
+                count = conn.execute(
+                    "SELECT COUNT(*) FROM training_records WHERE status='PENDING' AND domain_tag=?",
+                    (domain,),
+                ).fetchone()[0]
             conn.close()
             return count
         except sqlite3.Error:
@@ -220,7 +253,7 @@ class GristMillTrainerService:
 
     # ── Cycle orchestration ───────────────────────────────────────────────────
 
-    async def _run_cycle(self) -> None:
+    async def _run_cycle(self, domain: str = "default") -> None:
         cycle_start = time.time()
         cycle_version = (
             self.checkpoint_mgr.read_manifest() or type("M", (), {"current_version": 0})()
@@ -231,7 +264,7 @@ class GristMillTrainerService:
 
         await self.ipc_server.emit_training_started(
             estimated_duration_minutes=60,
-            record_count=self._count_pending(),
+            record_count=self._count_pending(domain=domain),
         )
 
         # Progress heartbeat task
@@ -257,7 +290,7 @@ class GristMillTrainerService:
             ]
 
             # ── Run LoRA training ─────────────────────────────────────────────
-            prior_adapter = self.checkpoint_mgr.active_adapter_path()
+            prior_adapter = self.checkpoint_mgr.active_adapter_path(domain=domain)
             engine = DistillationEngine(
                 base_model_name=self.base_model_name,
                 prior_adapter_path=prior_adapter,
@@ -268,18 +301,23 @@ class GristMillTrainerService:
                     training_db_path=self.training_db_path,
                     retention_records=retention_records,
                     version=cycle_version,
+                    domain=domain,
                 ),
             )
 
             if not cycle_result.success:
-                logger.error("Training cycle failed: %s", cycle_result.error)
-                self._record_cycle(cycle_start, cycle_version, 0, False, cycle_result.error)
+                logger.error("Training cycle [%s] failed: %s", domain, cycle_result.error)
+                self._record_cycle(
+                    cycle_start, cycle_version, 0, False, cycle_result.error, domain=domain
+                )
                 async with self._lock:
-                    self._state = TrainerState.IDLE
+                    self._active_domains.discard(domain)
+                    if not self._active_domains:
+                        self._state = TrainerState.IDLE
                 return
 
-            # Stage the adapter
-            self.checkpoint_mgr.write_staging(cycle_result.adapter_path)
+            # Stage the adapter for this domain
+            self.checkpoint_mgr.write_staging(cycle_result.adapter_path, domain=domain)
 
             # ── Validation ────────────────────────────────────────────────────
             async with self._lock:
@@ -289,7 +327,7 @@ class GristMillTrainerService:
             val_result: ValidationResult = await loop.run_in_executor(
                 None,
                 lambda: self.validation_runner.validate(
-                    staged_adapter_path=self.checkpoint_mgr.staging_dir,
+                    staged_adapter_path=self.checkpoint_mgr.domain_staging_dir(domain),
                     prior_adapter_path=prior_adapter,
                     retention_records=retention_records,
                 ),
@@ -298,20 +336,31 @@ class GristMillTrainerService:
 
             if val_result.passed:
                 await self._promote(
-                    cycle_start, cycle_version, cycle_result.record_count, val_result
+                    cycle_start,
+                    cycle_version,
+                    cycle_result.record_count,
+                    val_result,
+                    domain=domain,
+                    teacher_cost_usd=cycle_result.teacher_cost_usd,
                 )
             else:
                 await self._rollback(
-                    cycle_version, val_result.failure_reason or "validation failed"
+                    cycle_version,
+                    val_result.failure_reason or "validation failed",
+                    domain=domain,
                 )
 
         except asyncio.CancelledError:
             raise
         except Exception:
-            logger.exception("Cycle error")
-            self._record_cycle(cycle_start, cycle_version, 0, False, "unexpected error")
+            logger.exception("Cycle error [domain=%s]", domain)
+            self._record_cycle(
+                cycle_start, cycle_version, 0, False, "unexpected error", domain=domain
+            )
             async with self._lock:
-                self._state = TrainerState.IDLE
+                self._active_domains.discard(domain)
+                if not self._active_domains:
+                    self._state = TrainerState.IDLE
         finally:
             progress_task.cancel()
             self._write_status_file()
@@ -322,6 +371,8 @@ class GristMillTrainerService:
         version: int,
         record_count: int,
         val_result: ValidationResult,
+        domain: str = "default",
+        teacher_cost_usd: float = 0.0,
     ) -> None:
         async with self._lock:
             self._state = TrainerState.PROMOTING
@@ -329,34 +380,55 @@ class GristMillTrainerService:
         new_version = self.checkpoint_mgr.promote_staging(
             validation_score=val_result.overall_score,
             record_count=record_count,
+            domain=domain,
         )
         self._last_cycle_at = time.time()
-        self._record_cycle(cycle_start, new_version, record_count, False, None)
+        # Accumulate cost totals.
+        self._teacher_cost_usd_total += teacher_cost_usd
+        self._cost_by_domain[domain] = self._cost_by_domain.get(domain, 0.0) + teacher_cost_usd
+        self._record_cycle(
+            cycle_start,
+            new_version,
+            record_count,
+            False,
+            None,
+            domain=domain,
+            teacher_cost_usd=teacher_cost_usd,
+        )
 
         await self.ipc_server.emit_checkpoint_promoted(
             version=new_version,
             validation_score=val_result.overall_score,
             record_count=record_count,
+            domain=domain,
         )
         logger.info(
-            "Checkpoint promoted to v%d (score=%.4f)", new_version, val_result.overall_score
+            "Checkpoint [%s] promoted to v%d (score=%.4f, cost=$%.4f)",
+            domain,
+            new_version,
+            val_result.overall_score,
+            teacher_cost_usd,
         )
 
         async with self._lock:
-            self._state = TrainerState.IDLE
+            self._active_domains.discard(domain)
+            if not self._active_domains:
+                self._state = TrainerState.IDLE
 
-    async def _rollback(self, version: int, reason: str) -> None:
+    async def _rollback(self, version: int, reason: str, domain: str = "default") -> None:
         async with self._lock:
             self._state = TrainerState.ROLLING_BACK
 
-        self.checkpoint_mgr.discard_staging(reason)
-        self._record_cycle(time.time(), version, 0, True, reason)
+        self.checkpoint_mgr.discard_staging(reason, domain=domain)
+        self._record_cycle(time.time(), version, 0, True, reason, domain=domain)
 
         await self.ipc_server.emit_checkpoint_rolled_back(version=version, reason=reason)
-        logger.warning("Checkpoint rolled back (reason=%s)", reason)
+        logger.warning("Checkpoint [%s] rolled back (reason=%s)", domain, reason)
 
         async with self._lock:
-            self._state = TrainerState.IDLE
+            self._active_domains.discard(domain)
+            if not self._active_domains:
+                self._state = TrainerState.IDLE
 
     async def _progress_heartbeat(self, start: float) -> None:
         """Emit training_progress every STATUS_WRITE_SECS during active cycle."""
@@ -386,14 +458,15 @@ class GristMillTrainerService:
 
     # ── Manual rollback ───────────────────────────────────────────────────────
 
-    def manual_rollback(self, version: int) -> bool:
-        ok = self.checkpoint_mgr.rollback_to(version)
+    def manual_rollback(self, version: int, domain: str = "default") -> bool:
+        ok = self.checkpoint_mgr.rollback_to(version, domain=domain)
         if ok:
             asyncio.create_task(
                 self.ipc_server.emit_checkpoint_promoted(
                     version=version,
                     validation_score=0.0,
                     record_count=0,
+                    domain=domain,
                 )
             )
         return ok
@@ -417,6 +490,16 @@ class GristMillTrainerService:
                 else None
             ),
             "buffer_pending_count": self._count_pending(),
+            "teacher_cost_usd_total": round(self._teacher_cost_usd_total, 6),
+            "domains": manifest.domains if manifest else {},
+        }
+
+    def cost_summary(self) -> dict[str, Any]:
+        """Return teacher compute cost breakdown by domain."""
+        return {
+            "total_usd": round(self._teacher_cost_usd_total, 6),
+            "by_domain": {domain: round(cost, 6) for domain, cost in self._cost_by_domain.items()},
+            "cycle_count": len(self._cycle_history),
         }
 
     def cycle_history(self) -> list[dict]:
@@ -434,6 +517,8 @@ class GristMillTrainerService:
         record_count: int,
         rolled_back: bool,
         error: Optional[str],
+        domain: str = "default",
+        teacher_cost_usd: float = 0.0,
     ) -> None:
         now = time.time()
         self._cycle_history.append(
@@ -447,6 +532,8 @@ class GristMillTrainerService:
                 if self._latest_validation
                 else 0.0,
                 rolled_back=rolled_back,
+                domain=domain,
+                teacher_cost_usd=teacher_cost_usd,
                 error=error,
             )
         )

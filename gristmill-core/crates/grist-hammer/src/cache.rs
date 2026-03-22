@@ -201,6 +201,8 @@ mod tests {
             cache_hit: false,
             tokens_used: 10,
             elapsed_ms: 5,
+            teacher_cost_usd: 0.0,
+            used_draft: false,
         }
     }
 

@@ -7,6 +7,7 @@ Endpoints:
     GET  /status                 — full trainer state
     GET  /history                — past cycle summaries
     GET  /validation/latest      — last validation report
+    GET  /cost                   — teacher compute cost breakdown by domain
     POST /pause                  — suspend scheduling
     POST /resume                 — re-enable scheduling
     POST /rollback/{version}     — promote a historical checkpoint
@@ -66,6 +67,12 @@ def create_app(service: "GristMillTrainerService") -> FastAPI:
         if result is None:
             raise HTTPException(status_code=404, detail="No validation results yet")
         return JSONResponse(result)
+
+    # ── GET /cost ─────────────────────────────────────────────────────────────
+
+    @app.get("/cost")
+    async def cost() -> JSONResponse:
+        return JSONResponse(service.cost_summary())
 
     # ── POST /pause ───────────────────────────────────────────────────────────
 

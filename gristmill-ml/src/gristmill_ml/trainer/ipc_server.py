@@ -113,7 +113,11 @@ class TrainerIpcServer:
     # ── Convenience emitters (typed) ──────────────────────────────────────────
 
     async def emit_checkpoint_promoted(
-        self, version: int, validation_score: float, record_count: int
+        self,
+        version: int,
+        validation_score: float,
+        record_count: int,
+        domain: str = "default",
     ) -> None:
         await self.emit(
             "checkpoint_promoted",
@@ -121,6 +125,7 @@ class TrainerIpcServer:
                 "version": version,
                 "validation_score": validation_score,
                 "record_count": record_count,
+                "domain": domain,
             },
         )
 

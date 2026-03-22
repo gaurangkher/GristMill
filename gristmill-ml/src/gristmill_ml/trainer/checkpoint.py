@@ -1,12 +1,20 @@
 """CheckpointManager — filesystem contract for LoRA adapter checkpoints.
 
-Directory layout (Section 4.6.3 of the spec):
+Directory layout (Phase 3 — multi-domain, Section 4.6.3 of the spec):
 
     /gristmill/checkpoints/
-        active/         — currently-loaded adapter (Inference Stack file-watches this)
-        staging/        — newly-trained adapter awaiting validation
-        history/v{N}/   — versioned archive (last 5 kept)
+        active/
+            {domain}/   — per-domain adapter (Inference Stack file-watches these)
+        staging/
+            {domain}/   — newly-trained domain adapter awaiting validation
+        history/
+            v{N}/
+                {domain}/  — versioned archive (last 5 versions kept per domain)
         manifest.json   — monotonically-versioned metadata (atomic write via rename)
+                          Phase 3 extension: includes per-domain version map
+
+The ``domain`` defaults to ``"default"`` for the unified single-adapter path
+used in Phase 2 and for backward compatibility.
 """
 
 from __future__ import annotations
@@ -14,7 +22,7 @@ from __future__ import annotations
 import json
 import logging
 import shutil
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -27,6 +35,9 @@ _FALLBACK_ROOT = Path.home() / ".gristmill" / "checkpoints"
 
 HISTORY_KEEP = 5  # Number of historical versions to retain
 
+# Supported domain tags (must stay in sync with DomainTag in training_buffer.rs).
+KNOWN_DOMAINS = ("code", "writing", "reasoning", "qa", "creative", "other", "default")
+
 
 # ── Manifest ─────────────────────────────────────────────────────────────────
 
@@ -38,6 +49,9 @@ class Manifest:
     validation_score: float
     record_count_at_promotion: int
     rolled_back: bool = False
+    # Phase 3: per-domain version tracking.
+    # Maps domain name → {version, validation_score, promoted_at}.
+    domains: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -50,6 +64,7 @@ class Manifest:
             validation_score=float(d["validation_score"]),
             record_count_at_promotion=int(d["record_count_at_promotion"]),
             rolled_back=bool(d.get("rolled_back", False)),
+            domains=dict(d.get("domains", {})),
         )
 
 
@@ -58,6 +73,12 @@ class Manifest:
 
 class CheckpointManager:
     """Manages versioned LoRA adapter checkpoints on the filesystem.
+
+    Phase 3 extension: supports per-domain adapter directories.
+
+    ``active/{domain}/``   — adapter currently served by the Inference Stack.
+    ``staging/{domain}/``  — adapter awaiting validation after a training cycle.
+    ``history/v{N}/{domain}/`` — archived versions.
 
     All mutations are safe to call concurrently with the Inference Stack
     reading ``active/`` — the critical path (active promotion) is performed
@@ -79,6 +100,20 @@ class CheckpointManager:
         for d in (self.active_dir, self.staging_dir, self.history_dir):
             d.mkdir(parents=True, exist_ok=True)
 
+    # ── Domain-aware path helpers ─────────────────────────────────────────────
+
+    def domain_active_dir(self, domain: str = "default") -> Path:
+        """Return the active adapter path for *domain*."""
+        return self.active_dir / domain
+
+    def domain_staging_dir(self, domain: str = "default") -> Path:
+        """Return the staging adapter path for *domain*."""
+        return self.staging_dir / domain
+
+    def domain_history_dir(self, version: int, domain: str = "default") -> Path:
+        """Return the history path for *version* and *domain*."""
+        return self.history_dir / f"v{version}" / domain
+
     # ── Manifest ──────────────────────────────────────────────────────────────
 
     def read_manifest(self) -> Optional[Manifest]:
@@ -99,15 +134,17 @@ class CheckpointManager:
 
     # ── Staging ───────────────────────────────────────────────────────────────
 
-    def write_staging(self, adapter_dir: Path) -> None:
-        """Copy *adapter_dir* contents into the staging directory.
+    def write_staging(self, adapter_dir: Path, domain: str = "default") -> None:
+        """Copy *adapter_dir* contents into the staging directory for *domain*.
 
-        Clears any previous staging content first.
+        Clears any previous staging content for that domain first.
         """
-        if self.staging_dir.exists():
-            shutil.rmtree(self.staging_dir)
-        shutil.copytree(adapter_dir, self.staging_dir)
-        logger.info("Adapter staged from %s", adapter_dir)
+        dest = self.domain_staging_dir(domain)
+        if dest.exists():
+            shutil.rmtree(dest)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(adapter_dir, dest)
+        logger.info("Adapter staged from %s → staging/%s", adapter_dir, domain)
 
     # ── Promotion ─────────────────────────────────────────────────────────────
 
@@ -115,12 +152,13 @@ class CheckpointManager:
         self,
         validation_score: float,
         record_count: int,
+        domain: str = "default",
     ) -> int:
-        """Promote the staged adapter to active.
+        """Promote the staged adapter for *domain* to active.
 
-        1. Archive current active to history/v{N}.
-        2. Move staging → active.
-        3. Write updated manifest.
+        1. Archive current active/{domain} to history/v{N}/{domain}.
+        2. Move staging/{domain} → active/{domain}.
+        3. Write updated manifest (includes per-domain version map).
         4. Prune old history.
 
         Returns the new version number.
@@ -128,63 +166,86 @@ class CheckpointManager:
         manifest = self.read_manifest()
         new_version = (manifest.current_version + 1) if manifest else 1
 
-        # Archive current active (if it has any files)
-        if any(self.active_dir.iterdir()):
-            archive = self.history_dir / f"v{new_version - 1}"
-            archive.mkdir(parents=True, exist_ok=True)
-            if archive.exists() and any(archive.iterdir()):
+        active_domain = self.domain_active_dir(domain)
+        staging_domain = self.domain_staging_dir(domain)
+
+        # Archive current active/{domain} (if it has any files)
+        if active_domain.exists() and any(active_domain.iterdir()):
+            archive = self.domain_history_dir(new_version - 1, domain)
+            archive.parent.mkdir(parents=True, exist_ok=True)
+            if archive.exists():
                 shutil.rmtree(archive)
-            shutil.copytree(self.active_dir, archive, dirs_exist_ok=True)
-            logger.info("Archived active adapter → history/v%d", new_version - 1)
+            shutil.copytree(active_domain, archive)
+            logger.info("Archived active/%s → history/v%d/%s", domain, new_version - 1, domain)
 
-        # Atomic move: staging → active
-        if self.active_dir.exists():
-            shutil.rmtree(self.active_dir)
-        shutil.copytree(self.staging_dir, self.active_dir)
-        shutil.rmtree(self.staging_dir)
-        self.staging_dir.mkdir(parents=True, exist_ok=True)
-        logger.info("Promoted staging → active (version %d)", new_version)
+        # Atomic move: staging/{domain} → active/{domain}
+        if active_domain.exists():
+            shutil.rmtree(active_domain)
+        active_domain.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(staging_domain, active_domain)
+        shutil.rmtree(staging_domain)
+        staging_domain.mkdir(parents=True, exist_ok=True)
+        logger.info("Promoted staging/%s → active/%s (version %d)", domain, domain, new_version)
 
+        # Update manifest — bump global version and record per-domain info.
+        existing_domains = dict(manifest.domains) if manifest else {}
+        existing_domains[domain] = {
+            "version": new_version,
+            "validation_score": validation_score,
+            "promoted_at": datetime.now(timezone.utc).isoformat(),
+        }
         self._write_manifest(
             Manifest(
                 current_version=new_version,
                 promoted_at=datetime.now(timezone.utc).isoformat(),
                 validation_score=validation_score,
                 record_count_at_promotion=record_count,
+                domains=existing_domains,
             )
         )
         self._prune_history()
         return new_version
 
-    def discard_staging(self, reason: str) -> None:
-        """Move staging to history with rolled_back=True, keep active unchanged."""
+    def discard_staging(self, reason: str, domain: str = "default") -> None:
+        """Move staging/{domain} to history with rolled_back=True; keep active unchanged."""
         manifest = self.read_manifest()
         version = manifest.current_version if manifest else 0
+        staging_domain = self.domain_staging_dir(domain)
         # Archive the failed staging for inspection
-        failed_dir = self.history_dir / f"v{version}_failed"
+        failed_dir = self.history_dir / f"v{version}_failed" / domain
+        failed_dir.parent.mkdir(parents=True, exist_ok=True)
         if failed_dir.exists():
             shutil.rmtree(failed_dir)
-        if any(self.staging_dir.iterdir()):
-            shutil.copytree(self.staging_dir, failed_dir)
-        shutil.rmtree(self.staging_dir)
-        self.staging_dir.mkdir(parents=True, exist_ok=True)
-        logger.warning("Discarded staging adapter — reason: %s", reason)
+        if staging_domain.exists() and any(staging_domain.iterdir()):
+            shutil.copytree(staging_domain, failed_dir)
+        if staging_domain.exists():
+            shutil.rmtree(staging_domain)
+        staging_domain.mkdir(parents=True, exist_ok=True)
+        logger.warning("Discarded staging/%s — reason: %s", domain, reason)
 
     # ── Rollback ──────────────────────────────────────────────────────────────
 
-    def rollback_to(self, version: int) -> bool:
-        """Promote a specific historical version to active.
+    def rollback_to(self, version: int, domain: str = "default") -> bool:
+        """Promote a specific historical version of *domain* adapter to active.
 
         Returns True on success, False if the version does not exist.
         """
-        src = self.history_dir / f"v{version}"
+        src = self.domain_history_dir(version, domain)
         if not src.exists():
-            logger.error("Rollback failed — history/v%d not found", version)
+            logger.error("Rollback failed — history/v%d/%s not found", version, domain)
             return False
-        if self.active_dir.exists():
-            shutil.rmtree(self.active_dir)
-        shutil.copytree(src, self.active_dir)
+        active_domain = self.domain_active_dir(domain)
+        if active_domain.exists():
+            shutil.rmtree(active_domain)
+        active_domain.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(src, active_domain)
         manifest = self.read_manifest()
+        existing_domains = dict(manifest.domains) if manifest else {}
+        existing_domains[domain] = {
+            "version": version,
+            "validation_score": manifest.validation_score if manifest else 0.0,
+            "promoted_at": datetime.now(timezone.utc).isoformat(),
+        }
         self._write_manifest(
             Manifest(
                 current_version=version,
@@ -192,9 +253,10 @@ class CheckpointManager:
                 validation_score=manifest.validation_score if manifest else 0.0,
                 record_count_at_promotion=manifest.record_count_at_promotion if manifest else 0,
                 rolled_back=True,
+                domains=existing_domains,
             )
         )
-        logger.info("Rolled back to history/v%d", version)
+        logger.info("Rolled back domain %s to history/v%d", domain, version)
         return True
 
     # ── History listing ───────────────────────────────────────────────────────
@@ -220,11 +282,14 @@ class CheckpointManager:
 
     # ── Active adapter path ───────────────────────────────────────────────────
 
-    def active_adapter_path(self) -> Optional[Path]:
-        """Return path to active adapter if it has files, else None."""
-        if self.active_dir.exists() and any(self.active_dir.iterdir()):
-            return self.active_dir
+    def active_adapter_path(self, domain: str = "default") -> Optional[Path]:
+        """Return path to active adapter for *domain* if it has files, else None."""
+        path = self.domain_active_dir(domain)
+        if path.exists() and any(path.iterdir()):
+            return path
         return None
 
-    def has_staging(self) -> bool:
-        return self.staging_dir.exists() and any(self.staging_dir.iterdir())
+    def has_staging(self, domain: str = "default") -> bool:
+        """Return True if the staging directory for *domain* is non-empty."""
+        path = self.domain_staging_dir(domain)
+        return path.exists() and any(path.iterdir())

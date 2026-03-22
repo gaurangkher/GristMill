@@ -16,6 +16,51 @@ pub struct HammerConfig {
     pub cache: CacheConfig,
     #[serde(default)]
     pub batch: BatchConfig,
+    /// Per-provider cost rates for teacher compute cost tracking (Phase 3).
+    #[serde(default)]
+    pub cost: CostConfig,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CostConfig
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// USD cost rates per 1,000 tokens for each provider.
+///
+/// Used by [`crate::router::RequestRouter`] to populate
+/// [`crate::types::EscalationResponse::teacher_cost_usd`] so callers and the
+/// training buffer can track cumulative teacher spend.
+///
+/// Ollama is always `0.0` (local, no API cost).
+/// Anthropic rates are approximate — override via config for accuracy.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CostConfig {
+    /// USD per 1,000 tokens for the Anthropic primary model (default: claude-sonnet-4).
+    #[serde(default = "default_anthropic_primary_per_1k")]
+    pub anthropic_primary_per_1k: f64,
+    /// USD per 1,000 tokens for the Anthropic fallback model (default: claude-haiku).
+    #[serde(default = "default_anthropic_fallback_per_1k")]
+    pub anthropic_fallback_per_1k: f64,
+    /// USD per 1,000 tokens for Ollama (always 0 — local model, no API cost).
+    #[serde(default)]
+    pub ollama_per_1k: f64,
+}
+
+fn default_anthropic_primary_per_1k() -> f64 {
+    0.003 // ~$3 / 1M tokens for claude-sonnet-4
+}
+fn default_anthropic_fallback_per_1k() -> f64 {
+    0.00025 // ~$0.25 / 1M tokens for claude-haiku
+}
+
+impl Default for CostConfig {
+    fn default() -> Self {
+        Self {
+            anthropic_primary_per_1k: default_anthropic_primary_per_1k(),
+            anthropic_fallback_per_1k: default_anthropic_fallback_per_1k(),
+            ollama_per_1k: 0.0,
+        }
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

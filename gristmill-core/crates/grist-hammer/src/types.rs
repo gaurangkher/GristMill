@@ -23,6 +23,13 @@ pub struct EscalationRequest {
     /// Pre-computed prompt embedding for semantic cache lookup.
     /// If `None`, the cache falls back to exact SHA-256 matching only.
     pub embedding: Option<Vec<f32>>,
+    /// Speculative cascade draft (Phase 3).
+    ///
+    /// When set, the router asks the teacher to **verify and correct** this
+    /// draft rather than generating from scratch.  This reduces teacher token
+    /// consumption by 30–50% for MED-confidence queries where the grinder
+    /// already produced a plausible response.
+    pub draft_response: Option<String>,
 }
 
 impl EscalationRequest {
@@ -35,6 +42,7 @@ impl EscalationRequest {
             max_tokens,
             model_override: None,
             embedding: None,
+            draft_response: None,
         }
     }
 
@@ -47,6 +55,15 @@ impl EscalationRequest {
     /// Attach a pre-computed embedding (enables fuzzy cache lookup).
     pub fn with_embedding(mut self, embedding: Vec<f32>) -> Self {
         self.embedding = Some(embedding);
+        self
+    }
+
+    /// Attach a speculative grinder draft for teacher verification (Phase 3).
+    ///
+    /// The router will prepend the draft to the prompt so the teacher verifies
+    /// and corrects rather than generating from scratch.
+    pub fn with_draft(mut self, draft: impl Into<String>) -> Self {
+        self.draft_response = Some(draft.into());
         self
     }
 
@@ -91,6 +108,10 @@ pub struct EscalationResponse {
     pub tokens_used: u32,
     /// Wall-clock time from submission to response (ms).
     pub elapsed_ms: u64,
+    /// Estimated USD cost of this teacher call (0.0 for Ollama and cache hits).
+    pub teacher_cost_usd: f64,
+    /// `true` if the request used a speculative draft from the grinder.
+    pub used_draft: bool,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

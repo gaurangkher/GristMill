@@ -55,6 +55,7 @@
 //! }
 //! ```
 
+pub mod adapter_watcher;
 pub mod config;
 pub mod embedder;
 pub mod error;
@@ -65,6 +66,7 @@ pub mod registry;
 pub mod session;
 
 // Re-exports for convenience.
+pub use adapter_watcher::{domain_model_id, AdapterWatcher};
 pub use config::{GrindersConfig, ModelConfig, ModelRuntime};
 pub use error::GrindersError;
 pub use registry::{ModelRegistry, ModelSnapshot, ModelState};
@@ -175,6 +177,26 @@ impl Grinders {
     /// Number of warm (loaded) models.
     pub fn warm_model_count(&self) -> usize {
         self.registry.warm_count()
+    }
+
+    /// Start watching `active_dir` for per-domain adapter changes (Phase 3).
+    ///
+    /// When a domain sub-directory inside `active_dir` changes (e.g.
+    /// `/gristmill/checkpoints/active/code/`), the returned receiver yields
+    /// the domain name (`"code"`).  The caller should then call
+    /// `self.hot_reload(&domain_model_id(domain))` to swap in the new adapter.
+    ///
+    /// # Errors
+    /// Returns an error if the watcher cannot be started (e.g. the directory
+    /// does not exist or `inotify`/FSEvents is unavailable).
+    pub fn start_adapter_watch(
+        &self,
+        active_dir: std::path::PathBuf,
+    ) -> Result<(AdapterWatcher, tokio::sync::mpsc::UnboundedReceiver<String>), GrindersError> {
+        AdapterWatcher::spawn(active_dir).map_err(|e| GrindersError::ModelLoadFailed {
+            model_id: "adapter_watcher".into(),
+            reason: e.to_string(),
+        })
     }
 
     /// Build a concrete [`grist_sieve::features::EmbedderSession`] backed by

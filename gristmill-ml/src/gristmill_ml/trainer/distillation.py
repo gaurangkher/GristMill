@@ -39,6 +39,8 @@ class CycleResult:
     record_count: int
     duration_seconds: float
     success: bool
+    domain: str = "default"
+    teacher_cost_usd: float = 0.0
     error: Optional[str] = None
 
 
@@ -91,6 +93,7 @@ class DistillationEngine:
         training_db_path: Path,
         retention_records: list[dict],
         version: int,
+        domain: str = "default",
         max_steps: int = 500,
         batch_size: int = 4,
         gradient_accumulation_steps: int = 4,
@@ -100,8 +103,9 @@ class DistillationEngine:
     ) -> CycleResult:
         """Execute a full distillation cycle and return the staged adapter path.
 
-        Reads PENDING records from *training_db_path*, mixes in *retention_records*
-        for replay, trains a LoRA adapter, saves to a temp staging directory.
+        Reads PENDING records for *domain* from *training_db_path*, mixes in
+        *retention_records* for replay, trains a LoRA adapter, saves to a temp
+        staging directory.
         """
         import time
 
@@ -109,7 +113,7 @@ class DistillationEngine:
 
         try:
             # ── Load training records ─────────────────────────────────────────
-            pending = _load_pending_records(training_db_path)
+            pending = _load_pending_records(training_db_path, domain=domain)
             if not pending:
                 return CycleResult(
                     version=version,
@@ -118,6 +122,7 @@ class DistillationEngine:
                     record_count=0,
                     duration_seconds=time.time() - start,
                     success=False,
+                    domain=domain,
                     error="No PENDING records found",
                 )
 
@@ -126,6 +131,9 @@ class DistillationEngine:
                 len(pending),
                 len(retention_records),
             )
+
+            # Compute aggregate teacher cost from this batch.
+            cost_usd = sum(float(r.get("teacher_cost_usd", 0.0)) for r in pending)
 
             # Mark records IN_TRAINING
             _mark_in_training(training_db_path, [r["record_id"] for r in pending])
@@ -137,6 +145,7 @@ class DistillationEngine:
             adapter_path, train_loss = self._train_lora(
                 examples=examples,
                 version=version,
+                domain=domain,
                 max_steps=max_steps,
                 batch_size=batch_size,
                 gradient_accumulation_steps=gradient_accumulation_steps,
@@ -155,6 +164,8 @@ class DistillationEngine:
                 record_count=len(pending),
                 duration_seconds=time.time() - start,
                 success=True,
+                domain=domain,
+                teacher_cost_usd=cost_usd,
             )
 
         except Exception as exc:
@@ -166,6 +177,7 @@ class DistillationEngine:
                 record_count=0,
                 duration_seconds=time.time() - start,
                 success=False,
+                domain=domain,
                 error=str(exc),
             )
 
@@ -175,12 +187,13 @@ class DistillationEngine:
         self,
         examples: list[_Example],
         version: int,
-        max_steps: int,
-        batch_size: int,
-        gradient_accumulation_steps: int,
-        learning_rate: float,
-        lora_rank: int,
-        lora_alpha: int,
+        domain: str = "default",
+        max_steps: int = 500,
+        batch_size: int = 4,
+        gradient_accumulation_steps: int = 4,
+        learning_rate: float = 2e-4,
+        lora_rank: int = 16,
+        lora_alpha: int = 32,
     ) -> tuple[Path, float]:
         """Load base model, apply LoRA, run SFTTrainer, save adapter."""
         import torch
@@ -226,7 +239,7 @@ class DistillationEngine:
         formatted = [_format_example(ex, tokenizer) for ex in examples]
         hf_dataset = Dataset.from_list([{"text": t} for t in formatted])
 
-        output_path = self.output_dir / f"v{version}"
+        output_path = self.output_dir / f"v{version}" / domain
         output_path.mkdir(parents=True, exist_ok=True)
 
         sft_config = SFTConfig(
@@ -339,11 +352,25 @@ def _build_examples(
     return combined
 
 
-def _load_pending_records(db_path: Path) -> list[dict]:
+def _load_pending_records(db_path: Path, domain: str = "default") -> list[dict]:
+    """Load PENDING training records, optionally filtered by *domain*.
+
+    When *domain* is ``"default"`` all PENDING records are returned (unified
+    mode for backward compatibility).  For any other domain only records with
+    a matching ``domain_tag`` column are returned.
+    """
     try:
         conn = sqlite3.connect(str(db_path), check_same_thread=False)
         conn.row_factory = sqlite3.Row
-        rows = conn.execute("SELECT * FROM training_records WHERE status = 'PENDING'").fetchall()
+        if domain == "default":
+            rows = conn.execute(
+                "SELECT * FROM training_records WHERE status = 'PENDING'"
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM training_records WHERE status = 'PENDING' AND domain_tag = ?",
+                (domain,),
+            ).fetchall()
         conn.close()
         return [dict(r) for r in rows]
     except sqlite3.Error as exc:

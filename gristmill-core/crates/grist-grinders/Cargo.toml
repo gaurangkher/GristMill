@@ -45,6 +45,9 @@ parking_lot  = { workspace = true }
 arc-swap     = { workspace = true }
 dashmap      = { workspace = true }
 
+# filesystem watching (adapter hot-swap — Phase 3)
+notify       = { workspace = true }
+
 [dev-dependencies]
 tokio              = { workspace = true }
 tracing-subscriber = { workspace = true }

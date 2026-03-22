@@ -75,6 +75,9 @@ pub struct TrainingRecord {
     pub teacher_logits: Option<Vec<u8>>,
     /// Provider type — must be `"local_open_source"` for training use.
     pub provider_type: String,
+    /// Estimated USD cost of the teacher call that produced this record.
+    /// Always 0.0 for Ollama (local, no API cost).
+    pub teacher_cost_usd: f64,
 }
 
 /// Distillation training record domain classification.
@@ -297,31 +300,39 @@ fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
     conn.pragma_update(None, "synchronous", "NORMAL")?;
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS training_records (
-             record_id        TEXT    PRIMARY KEY,
-             timestamp        TEXT    NOT NULL,
-             query_text       TEXT    NOT NULL,
-             teacher_response TEXT    NOT NULL,
-             grinder_response TEXT,
-             confidence_score REAL    NOT NULL,
-             domain_tag       TEXT    NOT NULL,
-             teacher_logits   BLOB,
-             status           TEXT    NOT NULL DEFAULT 'PENDING',
-             in_retention     INTEGER NOT NULL DEFAULT 0,
-             provider_type    TEXT    NOT NULL
+             record_id          TEXT    PRIMARY KEY,
+             timestamp          TEXT    NOT NULL,
+             query_text         TEXT    NOT NULL,
+             teacher_response   TEXT    NOT NULL,
+             grinder_response   TEXT,
+             confidence_score   REAL    NOT NULL,
+             domain_tag         TEXT    NOT NULL,
+             teacher_logits     BLOB,
+             status             TEXT    NOT NULL DEFAULT 'PENDING',
+             in_retention       INTEGER NOT NULL DEFAULT 0,
+             provider_type      TEXT    NOT NULL,
+             teacher_cost_usd   REAL    NOT NULL DEFAULT 0.0
          );
 
          CREATE INDEX IF NOT EXISTS idx_status ON training_records(status);
          CREATE INDEX IF NOT EXISTS idx_domain  ON training_records(domain_tag);
         ",
-    )
+    )?;
+    // Migration: add teacher_cost_usd to existing databases that lack the column.
+    // SQLite returns an error if the column already exists; we silently ignore it.
+    let _ = conn.execute_batch(
+        "ALTER TABLE training_records ADD COLUMN teacher_cost_usd REAL NOT NULL DEFAULT 0.0;",
+    );
+    Ok(())
 }
 
 fn insert_record(conn: &Connection, r: &TrainingRecord) -> rusqlite::Result<()> {
     conn.execute(
         "INSERT OR IGNORE INTO training_records
             (record_id, timestamp, query_text, teacher_response, grinder_response,
-             confidence_score, domain_tag, teacher_logits, status, in_retention, provider_type)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'PENDING', 0, ?9)",
+             confidence_score, domain_tag, teacher_logits, status, in_retention,
+             provider_type, teacher_cost_usd)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'PENDING', 0, ?9, ?10)",
         params![
             r.record_id,
             r.timestamp,
@@ -332,6 +343,7 @@ fn insert_record(conn: &Connection, r: &TrainingRecord) -> rusqlite::Result<()> 
             r.domain_tag.as_str(),
             r.teacher_logits,
             r.provider_type,
+            r.teacher_cost_usd,
         ],
     )?;
     Ok(())
@@ -349,6 +361,7 @@ pub fn build_record(
     confidence_score: f32,
     domain_tag: DomainTag,
     provider_type: impl Into<String>,
+    teacher_cost_usd: f64,
 ) -> TrainingRecord {
     TrainingRecord {
         record_id: Ulid::new().to_string(),
@@ -360,6 +373,7 @@ pub fn build_record(
         domain_tag,
         teacher_logits: None,
         provider_type: provider_type.into(),
+        teacher_cost_usd,
     }
 }
 
@@ -379,6 +393,7 @@ mod tests {
             0.55,
             DomainTag::Qa,
             "local_open_source",
+            0.0,
         )
     }
 
@@ -390,6 +405,7 @@ mod tests {
             0.40,
             DomainTag::Reasoning,
             "commercial_api",
+            0.0,
         )
     }
 
@@ -487,6 +503,7 @@ mod tests {
             "status",
             "in_retention",
             "provider_type",
+            "teacher_cost_usd",
         ] {
             assert!(
                 cols.iter().any(|c| c == expected),
