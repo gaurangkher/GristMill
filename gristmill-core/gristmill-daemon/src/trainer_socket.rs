@@ -80,10 +80,7 @@ pub fn spawn(sock_path: PathBuf, reload: ReloadNotify) -> tokio::task::JoinHandl
     })
 }
 
-async fn connect_and_read(
-    sock_path: &PathBuf,
-    reload: ReloadNotify,
-) -> std::io::Result<()> {
+async fn connect_and_read(sock_path: &PathBuf, reload: ReloadNotify) -> std::io::Result<()> {
     let stream = UnixStream::connect(sock_path).await?;
     info!(sock = %sock_path.display(), "Connected to trainer.sock");
     let reader = BufReader::new(stream);
@@ -135,7 +132,11 @@ fn handle_message(json: &str, reload: ReloadNotify) {
                 .get("reason")
                 .and_then(|v| v.as_str())
                 .unwrap_or("unknown");
-            warn!(version = version, reason = reason, "Checkpoint rolled back — keeping current adapter");
+            warn!(
+                version = version,
+                reason = reason,
+                "Checkpoint rolled back — keeping current adapter"
+            );
         }
         "training_started" => {
             let est_mins = value
@@ -161,7 +162,11 @@ fn handle_message(json: &str, reload: ReloadNotify) {
                 .get("elapsed_minutes")
                 .and_then(|v| v.as_f64())
                 .unwrap_or(0.0);
-            debug!(pct = pct, elapsed_minutes = elapsed, "Trainer: cycle progress");
+            debug!(
+                pct = pct,
+                elapsed_minutes = elapsed,
+                "Trainer: cycle progress"
+            );
         }
         "trainer_paused" => {
             let reason = value

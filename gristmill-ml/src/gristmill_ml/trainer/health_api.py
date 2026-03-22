@@ -15,7 +15,7 @@ Endpoints:
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse

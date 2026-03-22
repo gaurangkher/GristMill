@@ -24,7 +24,7 @@ import asyncio
 import logging
 import sqlite3
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
