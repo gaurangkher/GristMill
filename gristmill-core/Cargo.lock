@@ -879,6 +879,8 @@ dependencies = [
  "ndarray 0.16.1",
  "ort",
  "parking_lot 0.12.5",
+ "regex",
+ "rusqlite",
  "serde",
  "serde_json",
  "sha2",

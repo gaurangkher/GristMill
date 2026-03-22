@@ -17,10 +17,13 @@ use grist_bus::EventBus;
 use grist_config::GristMillConfig;
 use grist_event::{ChannelType, GristEvent};
 use grist_grinders::GrindersConfig;
-use grist_hammer::{EscalationRequest, EscalationResponse, Hammer, HammerConfig};
+use grist_hammer::{EscalationRequest, EscalationResponse, Hammer, HammerConfig, ProviderType};
 use grist_ledger::{Ledger, LedgerConfig, Memory, RankedMemory};
 use grist_millwright::{Millwright, MillwrightConfig, Pipeline, PipelineResult};
-use grist_sieve::{RouteDecision, Sieve, SieveConfig};
+use grist_sieve::{
+    training_buffer::{build_record, DomainTag},
+    RouteDecision, Sieve, SieveConfig, TrainingBuffer,
+};
 use serde_json::Value;
 use tracing::info;
 
@@ -37,6 +40,10 @@ pub struct GristMillCore {
     pub(crate) hammer: Hammer,
     pub(crate) millwright: Millwright,
     pub bus: Arc<EventBus>,
+    /// Distillation training buffer.  All escalation results from open-source
+    /// local providers are written here for the `gristmill-trainer` service to
+    /// consume during LoRA training cycles.
+    pub(crate) training_buffer: TrainingBuffer,
 }
 
 impl GristMillCore {
@@ -63,7 +70,23 @@ impl GristMillCore {
         info!(workspace = %workspace.display(), "GristMillCore initialising subsystems");
 
         // ── Sieve ────────────────────────────────────────────────────────────
-        let sieve = Sieve::new(build_sieve_config(&cfg)).map_err(CoreError::Sieve)?;
+        let sieve_config = build_sieve_config(&cfg);
+        let sieve = Sieve::new(sieve_config.clone()).map_err(CoreError::Sieve)?;
+
+        // ── Training buffer ───────────────────────────────────────────────────
+        let training_buffer = match &sieve_config.training_buffer_path {
+            Some(path) => {
+                info!(db = %path.display(), "opening training buffer");
+                TrainingBuffer::open(path).unwrap_or_else(|e| {
+                    tracing::warn!(error = %e, "failed to open training buffer, using no-op");
+                    TrainingBuffer::noop()
+                })
+            }
+            None => {
+                tracing::warn!("no training_buffer_path configured — training buffer disabled");
+                TrainingBuffer::noop()
+            }
+        };
 
         // ── Bus ──────────────────────────────────────────────────────────────
         let bus = Arc::new(EventBus::default());
@@ -94,6 +117,7 @@ impl GristMillCore {
             hammer,
             millwright,
             bus,
+            training_buffer,
         })
     }
 
@@ -129,13 +153,73 @@ impl GristMillCore {
 
     // ── Hammer ────────────────────────────────────────────────────────────────
 
+    /// Escalate a prompt to the teacher model.
+    ///
+    /// Uses default context (confidence 0.0, domain "other").
+    /// Prefer [`escalate_and_record`] when the sieve's `RouteDecision` is
+    /// available so the training buffer receives accurate metadata.
     pub async fn escalate(
         &self,
         prompt: impl Into<String> + Send,
         max_tokens: u32,
     ) -> Result<EscalationResponse, CoreError> {
-        let req = EscalationRequest::new(prompt, max_tokens);
-        self.hammer.escalate(req).await.map_err(CoreError::Hammer)
+        let prompt = prompt.into();
+        let req = EscalationRequest::new(prompt.clone(), max_tokens);
+        let resp = self.hammer.escalate(req).await.map_err(CoreError::Hammer)?;
+        self.maybe_record_escalation(&prompt, &resp, 0.0, DomainTag::Other, None);
+        Ok(resp)
+    }
+
+    /// Escalate a prompt with full routing context for training signal quality.
+    ///
+    /// After a successful teacher response, writes a [`TrainingRecord`] to the
+    /// training buffer **only when** the provider is `LocalOpenSource` (Ollama /
+    /// llama.cpp).  Commercial API responses are silently skipped.
+    ///
+    /// # Arguments
+    /// * `prompt`            — The user query text (PII scrubbing applied automatically).
+    /// * `max_tokens`        — Max tokens for the LLM response.
+    /// * `confidence`        — Sieve confidence score that triggered escalation.
+    /// * `domain`            — Auto-classified domain tag from sieve.
+    /// * `grinder_response`  — Grinder's held response for MED confidence, if any.
+    pub async fn escalate_and_record(
+        &self,
+        prompt: impl Into<String> + Send,
+        max_tokens: u32,
+        confidence: f32,
+        domain: DomainTag,
+        grinder_response: Option<String>,
+    ) -> Result<EscalationResponse, CoreError> {
+        let prompt = prompt.into();
+        let req = EscalationRequest::new(prompt.clone(), max_tokens);
+        let resp = self.hammer.escalate(req).await.map_err(CoreError::Hammer)?;
+        self.maybe_record_escalation(&prompt, &resp, confidence, domain, grinder_response);
+        Ok(resp)
+    }
+
+    /// Write a training record if the provider is local open-source.
+    /// This is the **enforcement point** of the commercial-API training gate.
+    fn maybe_record_escalation(
+        &self,
+        query_text: &str,
+        resp: &EscalationResponse,
+        confidence: f32,
+        domain: DomainTag,
+        grinder_response: Option<String>,
+    ) {
+        // Cache hits carry the original provider_type — still respect the gate.
+        if resp.provider_type != ProviderType::LocalOpenSource {
+            return;
+        }
+        let record = build_record(
+            query_text,
+            &resp.content,
+            grinder_response,
+            confidence,
+            domain,
+            "local_open_source",
+        );
+        self.training_buffer.insert(record);
     }
 
     // ── Millwright ────────────────────────────────────────────────────────────
@@ -191,11 +275,20 @@ fn resolve(path: &Path, base: &Path) -> PathBuf {
 }
 
 fn build_sieve_config(cfg: &GristMillConfig) -> SieveConfig {
+    // Resolve training buffer path: config file → env var → default
+    // (~/.gristmill/db/training_buffer.sqlite via SieveConfig::default).
+    let training_buffer_path = cfg
+        .sieve
+        .training_buffer_path
+        .clone()
+        .or_else(|| SieveConfig::default().training_buffer_path);
+
     SieveConfig {
         model_path: cfg.sieve.model.clone(),
         confidence_threshold: cfg.sieve.confidence_threshold,
         feedback_dir: cfg.sieve.feedback_dir.clone(),
         exact_cache_size: cfg.sieve.cache_size,
+        training_buffer_path,
         ..SieveConfig::default()
     }
 }
@@ -374,6 +467,7 @@ mod tests {
             hammer,
             millwright,
             bus,
+            training_buffer: TrainingBuffer::noop(),
         }
     }
 

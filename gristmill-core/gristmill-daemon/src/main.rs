@@ -16,9 +16,10 @@ mod ipc;
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use grist_core::GristMillCore;
-use tracing::info;
+use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
@@ -53,6 +54,42 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
+    // ── inference.lock heartbeat (background task) ────────────────────────────
+    // Writes the current Unix epoch (seconds) to /gristmill/run/inference.lock
+    // every 10 seconds while the daemon is alive.  gristmill-trainer reads this
+    // file before claiming GPU memory — a stale heartbeat (>30s) means the
+    // Inference Stack is idle and the trainer may proceed safely.
+    let lock_path = {
+        let run_dir = PathBuf::from("/gristmill/run");
+        if run_dir.exists() || std::fs::create_dir_all(&run_dir).is_ok() {
+            run_dir.join("inference.lock")
+        } else {
+            // Local development fallback: ~/.gristmill/run/inference.lock
+            let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+            let fallback = PathBuf::from(home).join(".gristmill").join("run");
+            let _ = std::fs::create_dir_all(&fallback);
+            fallback.join("inference.lock")
+        }
+    };
+    info!(lock = %lock_path.display(), "starting inference.lock heartbeat (10s interval)");
+    let heartbeat_handle = tokio::spawn(async move {
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(10));
+        loop {
+            interval.tick().await;
+            let epoch = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            if let Err(e) = tokio::fs::write(&lock_path, epoch.to_string()).await {
+                warn!(
+                    lock = %lock_path.display(),
+                    error = %e,
+                    "failed to write inference.lock heartbeat"
+                );
+            }
+        }
+    });
+
     info!("GristMill daemon ready — press Ctrl+C to stop");
     info!(socket = %socket_path.display(), "IPC socket");
 
@@ -79,5 +116,6 @@ async fn main() -> anyhow::Result<()> {
     }
 
     server_handle.abort();
+    heartbeat_handle.abort();
     Ok(())
 }

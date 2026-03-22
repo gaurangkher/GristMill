@@ -45,6 +45,8 @@ pub mod cost_oracle;
 pub mod error;
 pub mod features;
 pub mod feedback;
+pub mod pii;
+pub mod training_buffer;
 
 // Re-exports for convenience.
 pub use cache::RoutingCache;
@@ -53,6 +55,7 @@ pub use config::SieveConfig;
 pub use cost_oracle::RouteDecision;
 pub use error::SieveError;
 pub use features::FeatureExtractor;
+pub use training_buffer::{DomainTag, TrainingBuffer, TrainingRecord};
 
 use grist_event::GristEvent;
 use tracing::{debug, info, instrument, warn};

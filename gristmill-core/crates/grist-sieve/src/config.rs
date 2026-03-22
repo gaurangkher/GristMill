@@ -41,10 +41,27 @@ pub struct SieveConfig {
 
     /// Prompt template ID used for HYBRID routes.
     pub hybrid_prompt_template: Option<String>,
+
+    /// Path to the SQLite WAL training buffer database.
+    ///
+    /// When `Some`, a [`TrainingBuffer`](crate::training_buffer::TrainingBuffer)
+    /// is opened at this path and escalation records are written after each
+    /// successful open-source teacher response.
+    ///
+    /// Default: `~/.gristmill/db/training_buffer.sqlite`
+    pub training_buffer_path: Option<PathBuf>,
 }
 
 impl Default for SieveConfig {
     fn default() -> Self {
+        // Resolve default training buffer path to ~/.gristmill/db/
+        let training_buffer_path = std::env::var("HOME").ok().map(|h| {
+            PathBuf::from(h)
+                .join(".gristmill")
+                .join("db")
+                .join("training_buffer.sqlite")
+        });
+
         Self {
             model_path: None,
             confidence_threshold: 0.85,
@@ -55,6 +72,7 @@ impl Default for SieveConfig {
             default_local_model: None,
             default_rule_id: None,
             hybrid_prompt_template: None,
+            training_buffer_path,
         }
     }
 }

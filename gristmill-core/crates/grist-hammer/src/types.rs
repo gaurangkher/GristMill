@@ -79,12 +79,40 @@ pub struct EscalationResponse {
     pub content: String,
     /// Which provider served this request.
     pub provider: Provider,
+    /// Classification of the provider for training-buffer gating.
+    ///
+    /// Only `ProviderType::LocalOpenSource` responses may be written to the
+    /// distillation training buffer.  This field is derived from `provider`
+    /// and included explicitly so callers don't need to match on `Provider`.
+    pub provider_type: ProviderType,
     /// `true` if the response came from the semantic cache.
     pub cache_hit: bool,
     /// Tokens consumed (input + output; estimated for Ollama).
     pub tokens_used: u32,
     /// Wall-clock time from submission to response (ms).
     pub elapsed_ms: u64,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ProviderType
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Whether a provider is an open-source local model or a commercial API.
+///
+/// **Training buffer gate:** only `LocalOpenSource` responses may be written to
+/// the training buffer.  Writing commercial API outputs (Anthropic, OpenAI,
+/// etc.) as training data violates their Terms of Service.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderType {
+    /// Open-source model served locally (Ollama, llama.cpp, vLLM).
+    /// **Eligible** for training buffer writes.
+    LocalOpenSource,
+    /// Commercial LLM API (Anthropic, OpenAI, etc.).
+    /// **NEVER** eligible for training buffer writes — ToS violation.
+    CommercialApi,
+    /// Response served from the semantic cache — no provider was called.
+    Cache,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -111,6 +139,18 @@ impl Provider {
             Provider::AnthropicFallback => "anthropic_fallback",
             Provider::Ollama => "ollama",
             Provider::Cache => "cache",
+        }
+    }
+
+    /// Return the [`ProviderType`] classification for this provider.
+    ///
+    /// This is the training-buffer gate: only `LocalOpenSource` responses
+    /// may be inserted into the distillation training buffer.
+    pub fn provider_type(self) -> ProviderType {
+        match self {
+            Provider::AnthropicPrimary | Provider::AnthropicFallback => ProviderType::CommercialApi,
+            Provider::Ollama => ProviderType::LocalOpenSource,
+            Provider::Cache => ProviderType::Cache,
         }
     }
 }

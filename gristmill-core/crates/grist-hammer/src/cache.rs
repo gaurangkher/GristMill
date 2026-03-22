@@ -197,6 +197,7 @@ mod tests {
             request_id: "test-id".into(),
             content: content.into(),
             provider: Provider::AnthropicPrimary,
+            provider_type: Provider::AnthropicPrimary.provider_type(),
             cache_hit: false,
             tokens_used: 10,
             elapsed_ms: 5,

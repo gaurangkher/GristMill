@@ -158,6 +158,9 @@ pub struct SieveConfig {
     pub feedback_dir: Option<PathBuf>,
     /// In-memory result cache size (LRU entries).
     pub cache_size: usize,
+    /// Path to the SQLite WAL distillation training buffer.
+    /// Defaults to `~/.gristmill/db/training_buffer.sqlite`.
+    pub training_buffer_path: Option<PathBuf>,
 }
 
 impl Default for SieveConfig {
@@ -167,6 +170,7 @@ impl Default for SieveConfig {
             confidence_threshold: 0.85,
             feedback_dir: None,
             cache_size: 10_000,
+            training_buffer_path: None,
         }
     }
 }
