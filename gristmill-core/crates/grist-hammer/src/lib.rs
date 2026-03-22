@@ -96,6 +96,8 @@ impl Hammer {
                 cache_hit: true,
                 provider_type: types::ProviderType::Cache,
                 request_id: req.id,
+                teacher_cost_usd: 0.0,
+                used_draft: false,
                 ..cached
             });
         }
@@ -106,6 +108,8 @@ impl Hammer {
                     cache_hit: true,
                     provider_type: types::ProviderType::Cache,
                     request_id: req.id,
+                    teacher_cost_usd: 0.0,
+                    used_draft: false,
                     ..cached
                 });
             }

@@ -28,6 +28,11 @@ use crate::config::HammerConfig;
 use crate::error::HammerError;
 use crate::types::{EscalationRequest, EscalationResponse, Provider};
 
+// Speculative cascade prompt template (Phase 3).
+// Instructs the teacher to verify rather than generate from scratch.
+const DRAFT_VERIFICATION_PREFIX: &str = "[GRINDER DRAFT — verify and correct if needed]\n";
+const DRAFT_VERIFICATION_SEPARATOR: &str = "\n\n[ORIGINAL QUERY]\n";
+
 // ─────────────────────────────────────────────────────────────────────────────
 // ProviderFn trait (used for test injection)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -149,6 +154,8 @@ impl RequestRouter {
                             cache_hit: false,
                             tokens_used: tokens,
                             elapsed_ms: start.elapsed().as_millis() as u64,
+                            teacher_cost_usd: self.cost_usd(provider, tokens),
+                            used_draft: req.draft_response.is_some(),
                         });
                     }
                     Err(e) => {
@@ -211,12 +218,24 @@ impl RequestRouter {
         model: &str,
         _provider: Provider,
     ) -> Result<(String, u32), HammerError> {
+        // Speculative cascade: if a grinder draft is present, ask the teacher
+        // to verify and correct it rather than generating from scratch.
+        // This typically reduces output tokens by 30–50%.
+        let effective_prompt: String = if let Some(draft) = &req.draft_response {
+            format!(
+                "{}{}{}{}",
+                DRAFT_VERIFICATION_PREFIX, draft, DRAFT_VERIFICATION_SEPARATOR, req.prompt
+            )
+        } else {
+            req.prompt.clone()
+        };
+
         let body = AnthropicRequest {
             model,
             max_tokens: req.max_tokens,
             messages: vec![AnthropicMessage {
                 role: "user",
-                content: &req.prompt,
+                content: &effective_prompt,
             }],
             system: req.system.as_deref(),
         };
@@ -258,9 +277,18 @@ impl RequestRouter {
 
     async fn call_ollama(&self, req: &EscalationRequest) -> Result<(String, u32), HammerError> {
         let model = &self.config.providers.ollama.model;
+        // Speculative cascade: same verification prompt for Ollama.
+        let effective_prompt: String = if let Some(draft) = &req.draft_response {
+            format!(
+                "{}{}{}{}",
+                DRAFT_VERIFICATION_PREFIX, draft, DRAFT_VERIFICATION_SEPARATOR, req.prompt
+            )
+        } else {
+            req.prompt.clone()
+        };
         let body = OllamaRequest {
             model,
-            prompt: &req.prompt,
+            prompt: &effective_prompt,
             stream: false,
         };
 
@@ -288,7 +316,7 @@ impl RequestRouter {
         Ok((parsed.response, tokens))
     }
 
-    // ── Helper ────────────────────────────────────────────────────────────
+    // ── Helpers ───────────────────────────────────────────────────────────
 
     fn make_response(
         &self,
@@ -297,6 +325,7 @@ impl RequestRouter {
         provider: Provider,
         start: Instant,
     ) -> EscalationResponse {
+        let teacher_cost_usd = self.cost_usd(provider, result.1);
         EscalationResponse {
             request_id: req.id.clone(),
             content: result.0,
@@ -305,7 +334,19 @@ impl RequestRouter {
             cache_hit: false,
             tokens_used: result.1,
             elapsed_ms: start.elapsed().as_millis() as u64,
+            teacher_cost_usd,
+            used_draft: req.draft_response.is_some(),
         }
+    }
+
+    /// Compute USD cost for `tokens` tokens from `provider`.
+    fn cost_usd(&self, provider: Provider, tokens: u32) -> f64 {
+        let per_1k = match provider {
+            Provider::AnthropicPrimary => self.config.cost.anthropic_primary_per_1k,
+            Provider::AnthropicFallback => self.config.cost.anthropic_fallback_per_1k,
+            Provider::Ollama | Provider::Cache => 0.0,
+        };
+        (tokens as f64 / 1_000.0) * per_1k
     }
 }
 
