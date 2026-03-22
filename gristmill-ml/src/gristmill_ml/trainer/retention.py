@@ -30,7 +30,7 @@ _FALLBACK_DB = Path.home() / ".gristmill" / "db" / "retention_buffer.sqlite"
 
 DEFAULT_MAX_SIZE = 2_000
 DOMAIN_TAGS = ("code", "writing", "reasoning", "qa", "creative", "other")
-STRATA = 4          # Confidence score buckets (0–0.25, 0.25–0.5, 0.5–0.75, 0.75–1.0)
+STRATA = 4  # Confidence score buckets (0–0.25, 0.25–0.5, 0.5–0.75, 0.75–1.0)
 MIN_RESPONSE_LEN = 20
 
 

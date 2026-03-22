@@ -85,9 +85,8 @@ class ValidationRunner:
     ) -> None:
         import os
 
-        self.base_model_name = (
-            base_model_name
-            or os.environ.get("GRISTMILL_BASE_MODEL", "Qwen/Qwen2.5-3B-Instruct")
+        self.base_model_name = base_model_name or os.environ.get(
+            "GRISTMILL_BASE_MODEL", "Qwen/Qwen2.5-3B-Instruct"
         )
         self.val_set_path = val_set_path or _DEFAULT_VALSET
         self.val_set_path.parent.mkdir(parents=True, exist_ok=True)
@@ -161,7 +160,9 @@ class ValidationRunner:
             d_prior = _mean_scores({k: v for k, v in prior_scores.items() if k in ids})
             delta = d_staged - d_prior
             worst_domain_delta = min(worst_domain_delta, delta)
-            domain_metrics.append(DomainMetrics(domain=domain, score=d_staged, count=len(domain_examples)))
+            domain_metrics.append(
+                DomainMetrics(domain=domain, score=d_staged, count=len(domain_examples))
+            )
 
         # Stage 1 pass/fail
         if overall_delta < OVERALL_DELTA_MIN:
@@ -184,7 +185,9 @@ class ValidationRunner:
             )
 
         # Stage 2 — retention score
-        logger.info("ValidationRunner: running Stage 2 on %d retention records", len(retention_records))
+        logger.info(
+            "ValidationRunner: running Stage 2 on %d retention records", len(retention_records)
+        )
         ret_staged = self._score_adapter_on_retention(staged_adapter_path, retention_records)
         ret_prior = (
             self._score_adapter_on_retention(prior_adapter_path, retention_records)
@@ -232,7 +235,9 @@ class ValidationRunner:
                 examples=examples,
             )
         except Exception as exc:
-            logger.warning("Adapter scoring failed (%s), falling back to 0.5: %s", adapter_path, exc)
+            logger.warning(
+                "Adapter scoring failed (%s), falling back to 0.5: %s", adapter_path, exc
+            )
             return {ex["record_id"]: 0.5 for ex in examples}
 
     def _score_adapter_on_retention(
@@ -244,8 +249,11 @@ class ValidationRunner:
         if adapter_path is None or not retention_records:
             return 1.0
         examples = [
-            {"record_id": r["record_id"], "query_text": r["query_text"],
-             "teacher_response": r["teacher_response"]}
+            {
+                "record_id": r["record_id"],
+                "query_text": r["query_text"],
+                "teacher_response": r["teacher_response"],
+            }
             for r in retention_records[:100]  # Sample for speed
         ]
         scores = self._score_adapter(adapter_path, examples)
@@ -305,7 +313,7 @@ def _run_adapter_inference(
             )
 
         for j, (ex, ref) in enumerate(zip(batch, references)):
-            generated_ids = out[j][enc["input_ids"].shape[1]:]
+            generated_ids = out[j][enc["input_ids"].shape[1] :]
             generated = tokenizer.decode(generated_ids, skip_special_tokens=True)
             scores[ex["record_id"]] = _rouge_l(generated, ref)
 
@@ -313,6 +321,7 @@ def _run_adapter_inference(
     del model, base
     try:
         import torch
+
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
     except Exception:
@@ -360,6 +369,7 @@ def _mean_scores(scores: dict[str, float]) -> float:
 def _cuda_available() -> bool:
     try:
         import torch
+
         return torch.cuda.is_available()
     except ImportError:
         return False

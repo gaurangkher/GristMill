@@ -34,7 +34,7 @@ HISTORY_KEEP = 5  # Number of historical versions to retain
 @dataclass
 class Manifest:
     current_version: int
-    promoted_at: str          # ISO 8601
+    promoted_at: str  # ISO 8601
     validation_score: float
     record_count_at_promotion: int
     rolled_back: bool = False
@@ -159,7 +159,7 @@ class CheckpointManager:
     def discard_staging(self, reason: str) -> None:
         """Move staging to history with rolled_back=True, keep active unchanged."""
         manifest = self.read_manifest()
-        version = (manifest.current_version if manifest else 0)
+        version = manifest.current_version if manifest else 0
         # Archive the failed staging for inspection
         failed_dir = self.history_dir / f"v{version}_failed"
         if failed_dir.exists():

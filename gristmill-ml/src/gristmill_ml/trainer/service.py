@@ -110,9 +110,8 @@ class GristMillTrainerService:
         import os
 
         self.training_db_path = training_db_path or _resolve_db_path()
-        self.base_model_name = (
-            base_model_name
-            or os.environ.get("GRISTMILL_BASE_MODEL", "Qwen/Qwen2.5-3B-Instruct")
+        self.base_model_name = base_model_name or os.environ.get(
+            "GRISTMILL_BASE_MODEL", "Qwen/Qwen2.5-3B-Instruct"
         )
         self.inference_lock_path = inference_lock_path or _resolve_lock_path()
         self.status_file_path = status_file_path or _resolve_status_path()
@@ -170,7 +169,9 @@ class GristMillTrainerService:
         if self._last_cycle_at is not None:
             days_since = (time.time() - self._last_cycle_at) / 86400
             if days_since >= CYCLE_CADENCE_DAYS:
-                logger.debug("Trigger: %.1f days since last cycle >= %d", days_since, CYCLE_CADENCE_DAYS)
+                logger.debug(
+                    "Trigger: %.1f days since last cycle >= %d", days_since, CYCLE_CADENCE_DAYS
+                )
                 return True
         return False
 
@@ -206,8 +207,9 @@ class GristMillTrainerService:
         # 2. VRAM check (best-effort)
         try:
             import torch
+
             if torch.cuda.is_available():
-                free_mb = torch.cuda.mem_get_info()[0] / (1024 ** 2)
+                free_mb = torch.cuda.mem_get_info()[0] / (1024**2)
                 if free_mb < VRAM_SAFETY_MB:
                     logger.debug("Insufficient VRAM (free=%.0f MB) — deferring", free_mb)
                     return False
@@ -220,7 +222,9 @@ class GristMillTrainerService:
 
     async def _run_cycle(self) -> None:
         cycle_start = time.time()
-        cycle_version = (self.checkpoint_mgr.read_manifest() or type("M", (), {"current_version": 0})()).current_version + 1
+        cycle_version = (
+            self.checkpoint_mgr.read_manifest() or type("M", (), {"current_version": 0})()
+        ).current_version + 1
 
         async with self._lock:
             self._state = TrainerState.TRAINING
@@ -231,9 +235,7 @@ class GristMillTrainerService:
         )
 
         # Progress heartbeat task
-        progress_task = asyncio.create_task(
-            self._progress_heartbeat(cycle_start)
-        )
+        progress_task = asyncio.create_task(self._progress_heartbeat(cycle_start))
 
         try:
             loop = asyncio.get_running_loop()
@@ -295,9 +297,13 @@ class GristMillTrainerService:
             self._latest_validation = val_result.to_dict()
 
             if val_result.passed:
-                await self._promote(cycle_start, cycle_version, cycle_result.record_count, val_result)
+                await self._promote(
+                    cycle_start, cycle_version, cycle_result.record_count, val_result
+                )
             else:
-                await self._rollback(cycle_version, val_result.failure_reason or "validation failed")
+                await self._rollback(
+                    cycle_version, val_result.failure_reason or "validation failed"
+                )
 
         except asyncio.CancelledError:
             raise
@@ -332,7 +338,9 @@ class GristMillTrainerService:
             validation_score=val_result.overall_score,
             record_count=record_count,
         )
-        logger.info("Checkpoint promoted to v%d (score=%.4f)", new_version, val_result.overall_score)
+        logger.info(
+            "Checkpoint promoted to v%d (score=%.4f)", new_version, val_result.overall_score
+        )
 
         async with self._lock:
             self._state = TrainerState.IDLE
@@ -405,7 +413,8 @@ class GristMillTrainerService:
             "current_version": manifest.current_version if manifest else 0,
             "last_cycle_at": (
                 datetime.fromtimestamp(self._last_cycle_at, tz=timezone.utc).isoformat()
-                if self._last_cycle_at else None
+                if self._last_cycle_at
+                else None
             ),
             "buffer_pending_count": self._count_pending(),
         }
@@ -435,7 +444,8 @@ class GristMillTrainerService:
                 record_count=record_count,
                 duration_minutes=round((now - start) / 60, 2),
                 validation_score=self._latest_validation.get("overall_score", 0.0)
-                if self._latest_validation else 0.0,
+                if self._latest_validation
+                else 0.0,
                 rolled_back=rolled_back,
                 error=error,
             )
@@ -447,6 +457,7 @@ class GristMillTrainerService:
     def _write_status_file(self) -> None:
         """Write trainer.status JSON every 30s for UI consumption."""
         import json
+
         try:
             self.status_file_path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self.status_file_path.with_suffix(".json.tmp")

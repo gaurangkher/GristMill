@@ -117,8 +117,11 @@ class TrainerIpcServer:
     ) -> None:
         await self.emit(
             "checkpoint_promoted",
-            {"version": version, "validation_score": validation_score,
-             "record_count": record_count},
+            {
+                "version": version,
+                "validation_score": validation_score,
+                "record_count": record_count,
+            },
         )
 
     async def emit_checkpoint_rolled_back(self, version: int, reason: str) -> None:
@@ -132,15 +135,16 @@ class TrainerIpcServer:
     ) -> None:
         await self.emit(
             "training_started",
-            {"estimated_duration_minutes": estimated_duration_minutes,
-             "record_count": record_count},
+            {
+                "estimated_duration_minutes": estimated_duration_minutes,
+                "record_count": record_count,
+            },
         )
 
     async def emit_training_progress(self, pct_complete: float, elapsed_minutes: float) -> None:
         await self.emit(
             "training_progress",
-            {"pct_complete": round(pct_complete, 3),
-             "elapsed_minutes": round(elapsed_minutes, 1)},
+            {"pct_complete": round(pct_complete, 3), "elapsed_minutes": round(elapsed_minutes, 1)},
         )
 
     async def emit_trainer_paused(self, reason: str) -> None:

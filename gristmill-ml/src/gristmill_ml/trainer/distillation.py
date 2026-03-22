@@ -76,9 +76,8 @@ class DistillationEngine:
     ) -> None:
         import os
 
-        self.base_model_name = (
-            base_model_name
-            or os.environ.get("GRISTMILL_BASE_MODEL", "Qwen/Qwen2.5-3B-Instruct")
+        self.base_model_name = base_model_name or os.environ.get(
+            "GRISTMILL_BASE_MODEL", "Qwen/Qwen2.5-3B-Instruct"
         )
         self.output_dir = output_dir or (Path.home() / ".gristmill" / "staging")
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -191,9 +190,7 @@ class DistillationEngine:
         from trl import SFTConfig, SFTTrainer
 
         logger.info("Loading base model: %s (device=%s)", self.base_model_name, self.device)
-        tokenizer = AutoTokenizer.from_pretrained(
-            self.base_model_name, trust_remote_code=True
-        )
+        tokenizer = AutoTokenizer.from_pretrained(self.base_model_name, trust_remote_code=True)
         if tokenizer.pad_token is None:
             tokenizer.pad_token = tokenizer.eos_token
 
@@ -218,8 +215,10 @@ class DistillationEngine:
 
         # If we have a prior adapter, load it as a reference for functional distillation
         if self.prior_adapter_path and self.prior_adapter_path.exists():
-            logger.info("Prior adapter available at %s — functional distillation enabled",
-                        self.prior_adapter_path)
+            logger.info(
+                "Prior adapter available at %s — functional distillation enabled",
+                self.prior_adapter_path,
+            )
             # Prior adapter penalty is applied implicitly: by mixing its outputs
             # into the training set as retention data (handled by replay examples).
 
@@ -268,6 +267,7 @@ class DistillationEngine:
 def _detect_device() -> str:
     try:
         import torch
+
         if torch.cuda.is_available():
             return "cuda"
         if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
@@ -295,9 +295,7 @@ def _format_example(ex: _Example, tokenizer) -> str:
             {"role": "user", "content": ex.prompt},
             {"role": "assistant", "content": ex.response},
         ]
-        return tokenizer.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=False
-        )
+        return tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=False)
     except Exception:
         # Fallback to simple format
         return f"<|user|>\n{ex.prompt}\n<|assistant|>\n{ex.response}"
@@ -309,8 +307,7 @@ def _build_examples(
 ) -> list[_Example]:
     """Merge pending + retention with the configured replay fraction."""
     main_examples = [
-        _Example(prompt=r["query_text"], response=r["teacher_response"])
-        for r in pending
+        _Example(prompt=r["query_text"], response=r["teacher_response"]) for r in pending
     ]
 
     if not retention:
@@ -335,7 +332,9 @@ def _build_examples(
     random.shuffle(combined)
     logger.info(
         "Training batch: %d new + %d replay = %d total",
-        len(main_examples), len(replay_examples), len(combined),
+        len(main_examples),
+        len(replay_examples),
+        len(combined),
     )
     return combined
 
@@ -344,9 +343,7 @@ def _load_pending_records(db_path: Path) -> list[dict]:
     try:
         conn = sqlite3.connect(str(db_path), check_same_thread=False)
         conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            "SELECT * FROM training_records WHERE status = 'PENDING'"
-        ).fetchall()
+        rows = conn.execute("SELECT * FROM training_records WHERE status = 'PENDING'").fetchall()
         conn.close()
         return [dict(r) for r in rows]
     except sqlite3.Error as exc:
