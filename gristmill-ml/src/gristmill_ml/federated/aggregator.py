@@ -30,13 +30,13 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-StateDict = dict[str, list]   # parameter_name → flat list of floats
+StateDict = dict[str, list]  # parameter_name → flat list of floats
 
 # ── Differential privacy constants ────────────────────────────────────────────
 
-_DEFAULT_CLIP_NORM = 1.0        # L2 clip norm (gradient clipping)
-_DEFAULT_NOISE_MULT = 1.1       # noise multiplier σ (Gaussian mechanism)
-_DEFAULT_DELTA = 1e-5           # δ for (ε, δ)-DP
+_DEFAULT_CLIP_NORM = 1.0  # L2 clip norm (gradient clipping)
+_DEFAULT_NOISE_MULT = 1.1  # noise multiplier σ (Gaussian mechanism)
+_DEFAULT_DELTA = 1e-5  # δ for (ε, δ)-DP
 _DEFAULT_EPSILON_BUDGET = 10.0  # total ε budget per device per model
 
 
@@ -105,9 +105,7 @@ class FedAvgAggregator:
                 agg = [a + v * w for a, v in zip(agg, vals)]
             aggregated[key] = agg
 
-        logger.debug(
-            "FedAvg aggregated %d deltas, %d parameters", len(deltas), len(keys)
-        )
+        logger.debug("FedAvg aggregated %d deltas, %d parameters", len(deltas), len(keys))
         return aggregated
 
     @staticmethod
@@ -163,7 +161,7 @@ class DifferentialPrivacyClip:
             A new ``StateDict`` with clipped + noised values.
         """
         # 1. Compute global L2 norm
-        sq_sum = sum(v ** 2 for vals in delta.values() for v in vals)
+        sq_sum = sum(v**2 for vals in delta.values() for v in vals)
         global_norm = math.sqrt(sq_sum) if sq_sum > 0 else 0.0
 
         # 2. Clip
@@ -173,13 +171,14 @@ class DifferentialPrivacyClip:
         # 3. Add Gaussian noise  σ = noise_multiplier × clip_norm
         sigma = self.noise_multiplier * self.clip_norm
         noised: StateDict = {
-            k: [v + random.gauss(0.0, sigma) for v in vals]
-            for k, vals in clipped.items()
+            k: [v + random.gauss(0.0, sigma) for v in vals] for k, vals in clipped.items()
         }
 
         logger.debug(
             "DP: global_norm=%.4f clip_scale=%.4f sigma=%.4f",
-            global_norm, scale, sigma,
+            global_norm,
+            scale,
+            sigma,
         )
         return noised
 
@@ -198,7 +197,7 @@ class DifferentialPrivacyClip:
         """
         if n_records <= 0 or batch_size <= 0:
             return float("inf")
-        q = batch_size / n_records             # sampling rate
+        q = batch_size / n_records  # sampling rate
         sigma = self.noise_multiplier
         # Simplified Gaussian mechanism ε ≈ q * sqrt(2 * ln(1.25/δ)) / σ
         # with δ = 1e-5
@@ -244,9 +243,7 @@ class PrivacyAccountant:
         state_path: Optional[Path] = None,
         epsilon_budget: float = _DEFAULT_EPSILON_BUDGET,
     ) -> None:
-        self._path = state_path or (
-            Path.home() / ".gristmill" / "privacy_budget.json"
-        )
+        self._path = state_path or (Path.home() / ".gristmill" / "privacy_budget.json")
         self._budget = self._load(epsilon_budget)
 
     def _load(self, default_budget: float) -> PrivacyBudget:
@@ -262,6 +259,7 @@ class PrivacyAccountant:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         from dataclasses import asdict
         from datetime import datetime, timezone
+
         self._budget.last_updated = datetime.now(timezone.utc).isoformat()
         tmp = self._path.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(asdict(self._budget), indent=2))

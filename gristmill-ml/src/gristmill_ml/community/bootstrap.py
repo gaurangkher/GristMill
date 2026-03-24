@@ -28,8 +28,8 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_DB = Path("/gristmill/db/training_buffer.sqlite")
 _FALLBACK_DB = Path.home() / ".gristmill" / "db" / "training_buffer.sqlite"
-_DEFAULT_MIN_RECORDS = 50       # bootstrap if fewer records than this
-_DEFAULT_MIN_SCORE = 0.70       # community adapter must meet this threshold
+_DEFAULT_MIN_RECORDS = 50  # bootstrap if fewer records than this
+_DEFAULT_MIN_SCORE = 0.70  # community adapter must meet this threshold
 
 
 class ColdStartBootstrapper:
@@ -57,14 +57,13 @@ class ColdStartBootstrapper:
         from gristmill_ml.trainer.checkpoint import CheckpointManager
 
         self._ckpt = CheckpointManager(root=checkpoint_root)
-        self._db_path = db_path or (
-            _DEFAULT_DB if _DEFAULT_DB.exists() else _FALLBACK_DB
-        )
+        self._db_path = db_path or (_DEFAULT_DB if _DEFAULT_DB.exists() else _FALLBACK_DB)
         self._min_records = min_records
         self._min_score = min_score
 
         if community_client is None:
             from gristmill_ml.community.client import CommunityRepoClient
+
             community_client = CommunityRepoClient.from_config()
         self._client = community_client
 
@@ -85,7 +84,9 @@ class ColdStartBootstrapper:
             if count < self._min_records:
                 logger.info(
                     "domain=%s has %d training records (< %d) — bootstrap recommended",
-                    domain, count, self._min_records,
+                    domain,
+                    count,
+                    self._min_records,
                 )
                 return True
             logger.debug("domain=%s has %d records — no bootstrap needed", domain, count)
@@ -111,16 +112,12 @@ class ColdStartBootstrapper:
             return False
 
         if not self._client._enabled:
-            logger.info(
-                "Skipping bootstrap for domain=%s — community repo not enabled", domain
-            )
+            logger.info("Skipping bootstrap for domain=%s — community repo not enabled", domain)
             return False
 
         # Skip if there's already a healthy active adapter for this domain
         if not force and self._ckpt.active_adapter_path(domain) is not None:
-            logger.debug(
-                "domain=%s already has an active adapter — skipping bootstrap", domain
-            )
+            logger.debug("domain=%s already has an active adapter — skipping bootstrap", domain)
             return False
 
         logger.info("Bootstrapping domain=%s from community repository …", domain)
@@ -139,6 +136,7 @@ class ColdStartBootstrapper:
 
             # Unpack into a temp adapter dir
             from gristmill_ml.export.bundle import AdapterBundle
+
             adapter_dest = tmp_path / "adapter"
             try:
                 manifest = AdapterBundle.unpack(downloaded, adapter_dest)
@@ -157,7 +155,10 @@ class ColdStartBootstrapper:
         logger.info(
             "Bootstrap complete: domain=%s promoted community adapter as v%d "
             "(validation_score=%.3f, community_id=%s)",
-            domain, version, manifest.validation_score, manifest.anonymized_id,
+            domain,
+            version,
+            manifest.validation_score,
+            manifest.anonymized_id,
         )
         return True
 

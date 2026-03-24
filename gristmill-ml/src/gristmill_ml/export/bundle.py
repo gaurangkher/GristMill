@@ -53,9 +53,9 @@ class BundleManifest:
     base_model: str
     validation_score: float
     record_count: int
-    created_at: str          # ISO 8601 UTC
-    anonymized_id: str       # UUID4 — no PII
-    sha256: str              # hex digest of adapter/ tree (deterministic)
+    created_at: str  # ISO 8601 UTC
+    anonymized_id: str  # UUID4 — no PII
+    sha256: str  # hex digest of adapter/ tree (deterministic)
     gristmill_version: str = "2.0"
     tags: list = field(default_factory=list)  # e.g. ["code", "python"]
     notes: str = ""
@@ -125,9 +125,7 @@ class AdapterBundle:
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         # Build sorted file list for deterministic SHA-256
-        adapter_files = sorted(
-            p for p in adapter_dir.rglob("*") if p.is_file()
-        )
+        adapter_files = sorted(p for p in adapter_dir.rglob("*") if p.is_file())
 
         sha256 = AdapterBundle._compute_tree_hash(adapter_files, adapter_dir)
 
@@ -154,7 +152,9 @@ class AdapterBundle:
         tmp_path.replace(output_path)
         logger.info(
             "Packed adapter bundle: domain=%s sha256=%.8s → %s",
-            domain, sha256, output_path,
+            domain,
+            sha256,
+            output_path,
         )
         return output_path
 
@@ -189,9 +189,7 @@ class AdapterBundle:
             names = zf.namelist()
             if _MANIFEST_NAME not in names:
                 raise ValueError(f"Invalid bundle — missing {_MANIFEST_NAME}")
-            manifest = BundleManifest.from_dict(
-                json.loads(zf.read(_MANIFEST_NAME))
-            )
+            manifest = BundleManifest.from_dict(json.loads(zf.read(_MANIFEST_NAME)))
 
             if manifest.schema_version > BUNDLE_SCHEMA_VERSION:
                 raise ValueError(
@@ -209,7 +207,7 @@ class AdapterBundle:
                     continue
                 if not name.startswith(_ADAPTER_PREFIX):
                     continue
-                rel = name[len(_ADAPTER_PREFIX):]
+                rel = name[len(_ADAPTER_PREFIX) :]
                 out = dest_dir / rel
                 out.parent.mkdir(parents=True, exist_ok=True)
                 out.write_bytes(zf.read(name))
@@ -226,7 +224,9 @@ class AdapterBundle:
 
         logger.info(
             "Unpacked adapter bundle: domain=%s version_schema=%d → %s",
-            manifest.domain, manifest.schema_version, dest_dir,
+            manifest.domain,
+            manifest.schema_version,
+            dest_dir,
         )
         return manifest
 
@@ -234,9 +234,7 @@ class AdapterBundle:
     def read_manifest(gmpack_path: Path) -> BundleManifest:
         """Read *only* the manifest from a `.gmpack` without extracting files."""
         with zipfile.ZipFile(gmpack_path, "r") as zf:
-            return BundleManifest.from_dict(
-                json.loads(zf.read(_MANIFEST_NAME))
-            )
+            return BundleManifest.from_dict(json.loads(zf.read(_MANIFEST_NAME)))
 
     @staticmethod
     def _compute_tree_hash(files: list, base_dir: Path) -> str:

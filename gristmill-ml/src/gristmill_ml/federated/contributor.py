@@ -69,6 +69,7 @@ class GradientContributor:
         self._token = os.environ.get("GRISTMILL_COMMUNITY_TOKEN") or token
 
         from gristmill_ml.federated.aggregator import DifferentialPrivacyClip, PrivacyAccountant
+
         self._dp = DifferentialPrivacyClip(clip_norm=clip_norm, noise_multiplier=noise_multiplier)
         self._accountant = PrivacyAccountant(epsilon_budget=epsilon_budget)
         self._contributor_id = contributor_id or self._load_or_create_id()
@@ -124,7 +125,9 @@ class GradientContributor:
             n_params = sum(len(v) for v in noised_delta.values())
             logger.info(
                 "[dry-run] Would contribute: domain=%s params=%d eps_cycle=%.4f",
-                domain, n_params, eps_cycle,
+                domain,
+                n_params,
+                eps_cycle,
             )
             self._accountant.record_contribution(eps_cycle)
             return True
@@ -178,11 +181,13 @@ class GradientContributor:
         try:
             import urllib.request
 
-            payload = json.dumps({
-                "domain": domain,
-                "contributor_id": self._contributor_id,
-                "delta": noised_delta,
-            }).encode()
+            payload = json.dumps(
+                {
+                    "domain": domain,
+                    "contributor_id": self._contributor_id,
+                    "delta": noised_delta,
+                }
+            ).encode()
 
             url = f"{self._endpoint}/v1/federation/contribute"
             headers: dict = {

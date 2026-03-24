@@ -129,6 +129,7 @@ def create_app(service: "GristMillTrainerService") -> FastAPI:
     @app.post("/ecosystem/import")
     async def ecosystem_import(body: ImportBody) -> JSONResponse:
         from pathlib import Path as _Path
+
         result = service.import_adapter(_Path(body.gmpack_path), domain=body.domain)
         if not result.get("ok"):
             raise HTTPException(status_code=400, detail=result.get("error"))

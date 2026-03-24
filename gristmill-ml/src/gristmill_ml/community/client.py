@@ -38,13 +38,13 @@ _DOWNLOAD_TIMEOUT_S = 300
 class AdapterMeta:
     """Summary of a community adapter returned by the list endpoint."""
 
-    adapter_id: str        # server-assigned opaque ID
-    anonymized_id: str     # UUID4 from the bundle manifest
+    adapter_id: str  # server-assigned opaque ID
+    anonymized_id: str  # UUID4 from the bundle manifest
     domain: str
     base_model: str
     validation_score: float
     record_count: int
-    created_at: str        # ISO 8601
+    created_at: str  # ISO 8601
     tags: list
     download_url: str
 
@@ -86,9 +86,7 @@ class CommunityRepoClient:
     ) -> None:
         self._enabled = enabled
         self._endpoint = (
-            os.environ.get("GRISTMILL_COMMUNITY_URL")
-            or endpoint
-            or _DEFAULT_ENDPOINT
+            os.environ.get("GRISTMILL_COMMUNITY_URL") or endpoint or _DEFAULT_ENDPOINT
         ).rstrip("/")
         self._token = os.environ.get("GRISTMILL_COMMUNITY_TOKEN") or token
 
@@ -131,17 +129,21 @@ class CommunityRepoClient:
             raise OSError(f"Bundle not found: {gmpack_path}")
 
         from gristmill_ml.export.bundle import AdapterBundle
+
         manifest = AdapterBundle.read_manifest(gmpack_path)
 
         if dry_run:
             logger.info(
                 "[dry-run] Would push bundle: domain=%s id=%s size=%d bytes",
-                manifest.domain, manifest.anonymized_id, gmpack_path.stat().st_size,
+                manifest.domain,
+                manifest.anonymized_id,
+                gmpack_path.stat().st_size,
             )
             return f"dry-run-{manifest.anonymized_id}"
 
         try:
             import urllib.request
+
             url = f"{self._endpoint}/v1/adapters"
             with gmpack_path.open("rb") as fh:
                 data = fh.read()
@@ -159,10 +161,12 @@ class CommunityRepoClient:
             with urllib.request.urlopen(req, timeout=_UPLOAD_TIMEOUT_S) as resp:
                 body = resp.read().decode()
             import json as _json
+
             adapter_id: str = _json.loads(body).get("adapter_id", "unknown")
             logger.info(
                 "Pushed adapter bundle: domain=%s adapter_id=%s",
-                manifest.domain, adapter_id,
+                manifest.domain,
+                adapter_id,
             )
             return adapter_id
         except Exception as exc:
@@ -192,11 +196,13 @@ class CommunityRepoClient:
             import urllib.parse
             import urllib.request
 
-            params = urllib.parse.urlencode({
-                "domain": domain,
-                "min_score": min_score,
-                "limit": limit,
-            })
+            params = urllib.parse.urlencode(
+                {
+                    "domain": domain,
+                    "min_score": min_score,
+                    "limit": limit,
+                }
+            )
             url = f"{self._endpoint}/v1/adapters?{params}"
             req = urllib.request.Request(url, headers=self._headers())
             with urllib.request.urlopen(req, timeout=30) as resp:
@@ -241,7 +247,11 @@ class CommunityRepoClient:
             else:
                 adapters = self.list_adapters(domain, min_score=min_score, limit=1)
                 if not adapters:
-                    logger.info("No community adapters found for domain=%s (min_score=%.2f)", domain, min_score)
+                    logger.info(
+                        "No community adapters found for domain=%s (min_score=%.2f)",
+                        domain,
+                        min_score,
+                    )
                     return None
                 download_url = adapters[0].download_url
 
@@ -284,7 +294,9 @@ class CommunityRepoClient:
         token = community.get("token", None)
 
         if enabled:
-            logger.info("Community adapter repository: enabled (endpoint=%s)", endpoint or _DEFAULT_ENDPOINT)
+            logger.info(
+                "Community adapter repository: enabled (endpoint=%s)", endpoint or _DEFAULT_ENDPOINT
+            )
         else:
             logger.debug("Community adapter repository: disabled (opt-in required)")
 
