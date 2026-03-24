@@ -26,10 +26,38 @@ interface SlackYamlConfig {
   reply_mode?: string;
 }
 
+interface CronJobYaml {
+  id: string;
+  interval_ms: number;
+  channel?: string;
+  payload?: unknown;
+  fire_immediately?: boolean;
+}
+
+interface FsWatchYaml {
+  path: string;
+  channel?: string;
+  recursive?: boolean;
+  debounce_ms?: number;
+}
+
+interface WebhookChannelYaml {
+  secret: string;
+  header?: string;
+}
+
+interface HoppersYamlConfig {
+  http?: { port?: number; host?: string };
+  webhook?: { port?: number; host?: string; channels?: Record<string, WebhookChannelYaml> };
+  cron?: { jobs?: CronJobYaml[] };
+  fs?: { watches?: FsWatchYaml[] };
+}
+
 interface IntegrationsYamlConfig {
   slack?: SlackYamlConfig;
   plugins_dir?: string;
   dashboard?: { port?: number; enabled?: boolean };
+  hoppers?: HoppersYamlConfig;
 }
 
 interface GristMillYaml {
@@ -49,9 +77,43 @@ export interface SlackConfig {
   replyMode: "thread" | "off";
 }
 
+export interface HttpHopperSettings {
+  port: number;
+  host: string;
+}
+
+export interface WebhookHopperSettings {
+  port: number;
+  host: string;
+  channels: Record<string, { secret: string; headerName: string }>;
+}
+
+export interface CronJobConfig {
+  id: string;
+  intervalMs: number;
+  channel: string;
+  payload: unknown;
+  fireImmediately: boolean;
+}
+
+export interface FsWatchConfig {
+  path: string;
+  channel: string;
+  recursive: boolean;
+  debounceMs: number;
+}
+
+export interface HoppersConfig {
+  http: HttpHopperSettings;
+  webhook: WebhookHopperSettings;
+  cron: CronJobConfig[];
+  fs: FsWatchConfig[];
+}
+
 export interface GristMillTsConfig {
   slack: SlackConfig;
   pluginsDir: string;
+  hoppers: HoppersConfig;
 }
 
 // ── Loader ────────────────────────────────────────────────────────────────────
@@ -89,7 +151,42 @@ export function loadConfig(): GristMillTsConfig {
     yaml.integrations?.plugins_dir ??
     join(homedir(), ".gristmill", "plugins");
 
-  return { slack, pluginsDir };
+  const h = yaml.integrations?.hoppers ?? {};
+
+  const hoppers: HoppersConfig = {
+    http: {
+      port: Number(process.env["GRISTMILL_HTTP_HOPPER_PORT"] ?? h.http?.port ?? 3001),
+      host: process.env["GRISTMILL_HTTP_HOPPER_HOST"] ?? h.http?.host ?? "0.0.0.0",
+    },
+    webhook: {
+      port: Number(process.env["GRISTMILL_WEBHOOK_PORT"] ?? h.webhook?.port ?? 3002),
+      host: process.env["GRISTMILL_WEBHOOK_HOST"] ?? h.webhook?.host ?? "0.0.0.0",
+      channels: Object.fromEntries(
+        Object.entries(h.webhook?.channels ?? {}).map(([ch, cfg]) => [
+          ch,
+          {
+            secret: cfg.secret,
+            headerName: cfg.header ?? "x-hub-signature-256",
+          },
+        ]),
+      ),
+    },
+    cron: (h.cron?.jobs ?? []).map((j) => ({
+      id: j.id,
+      intervalMs: j.interval_ms,
+      channel: j.channel ?? "cron",
+      payload: j.payload ?? {},
+      fireImmediately: j.fire_immediately ?? false,
+    })),
+    fs: (h.fs?.watches ?? []).map((w) => ({
+      path: w.path,
+      channel: w.channel ?? "fs",
+      recursive: w.recursive ?? false,
+      debounceMs: w.debounce_ms ?? 300,
+    })),
+  };
+
+  return { slack, pluginsDir, hoppers };
 }
 
 function _replyMode(raw?: string): "thread" | "off" {
