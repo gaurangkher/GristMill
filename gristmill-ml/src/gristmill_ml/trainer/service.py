@@ -579,7 +579,7 @@ class GristMillTrainerService:
         If *domain* is ``None``, the domain from the bundle manifest is used.
         """
         from gristmill_ml.export.bundle import AdapterBundle
-        import tempfile, shutil
+        import tempfile
 
         gmpack_path = Path(gmpack_path)
         if not gmpack_path.exists():
