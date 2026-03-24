@@ -3,14 +3,22 @@
 Listens on localhost:7432.  All endpoints return JSON.
 
 Endpoints:
-    GET  /health                 — liveness + last heartbeat seen
-    GET  /status                 — full trainer state
-    GET  /history                — past cycle summaries
-    GET  /validation/latest      — last validation report
-    GET  /cost                   — teacher compute cost breakdown by domain
-    POST /pause                  — suspend scheduling
-    POST /resume                 — re-enable scheduling
-    POST /rollback/{version}     — promote a historical checkpoint
+    GET  /health                           — liveness + last heartbeat seen
+    GET  /status                           — full trainer state
+    GET  /history                          — past cycle summaries
+    GET  /validation/latest                — last validation report
+    GET  /cost                             — teacher compute cost breakdown by domain
+    POST /pause                            — suspend scheduling
+    POST /resume                           — re-enable scheduling
+    POST /rollback/{version}               — promote a historical checkpoint
+
+    Phase 4 — Ecosystem:
+    GET  /ecosystem/status                 — community + federated opt-in status
+    POST /ecosystem/export/{domain}        — pack active adapter to .gmpack
+    POST /ecosystem/import                 — unpack + stage + promote a .gmpack
+    GET  /ecosystem/community/adapters     — list community adapters for domain
+    POST /ecosystem/community/push/{domain}— push active adapter to community repo
+    POST /ecosystem/community/bootstrap/{domain} — cold-start bootstrap
 """
 
 from __future__ import annotations
@@ -18,8 +26,9 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 if TYPE_CHECKING:
     from gristmill_ml.trainer.service import GristMillTrainerService
@@ -99,6 +108,59 @@ def create_app(service: "GristMillTrainerService") -> FastAPI:
                 detail=f"No checkpoint at version {version}",
             )
         return JSONResponse({"rolled_back_to": version})
+
+    # ── Phase 4: Ecosystem endpoints ──────────────────────────────────────────
+
+    @app.get("/ecosystem/status")
+    async def ecosystem_status() -> JSONResponse:
+        return JSONResponse(service.ecosystem_status())
+
+    @app.post("/ecosystem/export/{domain}")
+    async def ecosystem_export(domain: str) -> JSONResponse:
+        result = service.export_adapter(domain)
+        if not result.get("ok"):
+            raise HTTPException(status_code=400, detail=result.get("error"))
+        return JSONResponse(result)
+
+    class ImportBody(BaseModel):
+        gmpack_path: str
+        domain: str | None = None
+
+    @app.post("/ecosystem/import")
+    async def ecosystem_import(body: ImportBody) -> JSONResponse:
+        from pathlib import Path as _Path
+        result = service.import_adapter(_Path(body.gmpack_path), domain=body.domain)
+        if not result.get("ok"):
+            raise HTTPException(status_code=400, detail=result.get("error"))
+        return JSONResponse(result)
+
+    @app.get("/ecosystem/community/adapters")
+    async def ecosystem_community_adapters(
+        domain: str = Query(...),
+        min_score: float = Query(0.0, ge=0.0, le=1.0),
+        limit: int = Query(20, ge=1, le=100),
+    ) -> JSONResponse:
+        result = service.community_list_adapters(domain, min_score=min_score, limit=limit)
+        if not result.get("ok"):
+            raise HTTPException(status_code=400, detail=result.get("error"))
+        return JSONResponse(result)
+
+    @app.post("/ecosystem/community/push/{domain}")
+    async def ecosystem_community_push(domain: str) -> JSONResponse:
+        result = service.community_push(domain)
+        if not result.get("ok"):
+            raise HTTPException(status_code=400, detail=result.get("error"))
+        return JSONResponse(result)
+
+    @app.post("/ecosystem/community/bootstrap/{domain}")
+    async def ecosystem_bootstrap(
+        domain: str,
+        force: bool = Query(False),
+    ) -> JSONResponse:
+        result = service.bootstrap_domain(domain, force=force)
+        if not result.get("ok"):
+            raise HTTPException(status_code=400, detail=result.get("error"))
+        return JSONResponse(result)
 
     return app
 

@@ -508,6 +508,153 @@ class GristMillTrainerService:
     def latest_validation_result(self) -> Optional[dict]:
         return self._latest_validation
 
+    # ── Phase 4: Ecosystem methods ────────────────────────────────────────────
+
+    def ecosystem_status(self) -> dict[str, Any]:
+        """Return community opt-in status, federation status, and privacy budget."""
+        from gristmill_ml.community.client import CommunityRepoClient
+        from gristmill_ml.federated.contributor import GradientContributor
+        from gristmill_ml.federated.aggregator import PrivacyAccountant
+
+        client = CommunityRepoClient.from_config()
+        contributor = GradientContributor.from_config()
+        accountant = PrivacyAccountant()
+        budget = accountant.budget
+
+        return {
+            "community": {
+                "enabled": client._enabled,
+                "endpoint": client._endpoint,
+            },
+            "federated": {
+                "enabled": contributor._enabled,
+                "privacy_budget": {
+                    "epsilon_used": round(budget.epsilon_used, 4),
+                    "epsilon_budget": round(budget.epsilon_budget, 4),
+                    "remaining": round(budget.remaining, 4),
+                    "exhausted": budget.exhausted,
+                    "cycles_contributed": budget.cycles_contributed,
+                },
+            },
+        }
+
+    def export_adapter(self, domain: str, output_dir: Optional[Path] = None) -> dict[str, Any]:
+        """Pack the active adapter for *domain* into a .gmpack bundle.
+
+        Returns dict with ``gmpack_path`` on success, or ``error`` on failure.
+        """
+        from gristmill_ml.export.bundle import AdapterBundle
+
+        active = self.checkpoint_mgr.active_adapter_path(domain)
+        if active is None:
+            return {"ok": False, "error": f"No active adapter for domain '{domain}'"}
+
+        manifest = self.checkpoint_mgr.read_manifest()
+        score = 0.0
+        record_count = 0
+        base_model = self.base_model_name
+        if manifest and domain in manifest.domains:
+            score = manifest.domains[domain].get("validation_score", 0.0)
+
+        if output_dir is None:
+            output_dir = active.parent.parent  # checkpoints root
+
+        try:
+            gmpack = AdapterBundle.pack(
+                adapter_dir=active,
+                domain=domain,
+                output_path=Path(output_dir) / f"{domain}-export.gmpack",
+                base_model=base_model,
+                validation_score=score,
+                record_count=record_count,
+            )
+            return {"ok": True, "gmpack_path": str(gmpack), "domain": domain}
+        except Exception as exc:
+            logger.error("export_adapter failed: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
+    def import_adapter(self, gmpack_path: Path, domain: Optional[str] = None) -> dict[str, Any]:
+        """Unpack *gmpack_path*, stage, and promote it for *domain*.
+
+        If *domain* is ``None``, the domain from the bundle manifest is used.
+        """
+        from gristmill_ml.export.bundle import AdapterBundle
+        import tempfile, shutil
+
+        gmpack_path = Path(gmpack_path)
+        if not gmpack_path.exists():
+            return {"ok": False, "error": f"File not found: {gmpack_path}"}
+
+        with tempfile.TemporaryDirectory(prefix="gm_import_") as tmp:
+            adapter_dest = Path(tmp) / "adapter"
+            try:
+                bundle_manifest = AdapterBundle.unpack(gmpack_path, adapter_dest)
+            except Exception as exc:
+                return {"ok": False, "error": f"Unpack failed: {exc}"}
+
+            target_domain = domain or bundle_manifest.domain
+            self.checkpoint_mgr.write_staging(adapter_dest, domain=target_domain)
+            version = self.checkpoint_mgr.promote_staging(
+                validation_score=bundle_manifest.validation_score,
+                record_count=bundle_manifest.record_count,
+                domain=target_domain,
+            )
+
+        return {
+            "ok": True,
+            "domain": target_domain,
+            "version": version,
+            "validation_score": bundle_manifest.validation_score,
+            "anonymized_id": bundle_manifest.anonymized_id,
+        }
+
+    def community_list_adapters(
+        self, domain: str, min_score: float = 0.0, limit: int = 20
+    ) -> dict[str, Any]:
+        """List community adapters for *domain*."""
+        from gristmill_ml.community.client import CommunityRepoClient
+        from dataclasses import asdict
+
+        client = CommunityRepoClient.from_config()
+        if not client._enabled:
+            return {"ok": False, "error": "Community repository not enabled"}
+        try:
+            adapters = client.list_adapters(domain, min_score=min_score, limit=limit)
+            return {"ok": True, "adapters": [asdict(a) for a in adapters]}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def community_push(self, domain: str) -> dict[str, Any]:
+        """Export active adapter for *domain* and push to community repo."""
+        export_result = self.export_adapter(domain)
+        if not export_result.get("ok"):
+            return export_result
+
+        from gristmill_ml.community.client import CommunityRepoClient
+
+        client = CommunityRepoClient.from_config()
+        if not client._enabled:
+            return {"ok": False, "error": "Community repository not enabled"}
+        try:
+            adapter_id = client.push(Path(export_result["gmpack_path"]))
+            return {"ok": True, "adapter_id": adapter_id, "domain": domain}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def bootstrap_domain(self, domain: str, force: bool = False) -> dict[str, Any]:
+        """Trigger cold-start bootstrapping for *domain* from the community repo."""
+        from gristmill_ml.community.bootstrap import ColdStartBootstrapper
+
+        bootstrapper = ColdStartBootstrapper(
+            checkpoint_root=self.checkpoint_mgr.root,
+            db_path=self.training_db_path,
+        )
+        try:
+            success = bootstrapper.bootstrap(domain, force=force)
+            return {"ok": True, "bootstrapped": success, "domain": domain}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     def _record_cycle(
