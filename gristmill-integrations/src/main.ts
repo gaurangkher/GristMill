@@ -30,7 +30,7 @@ import type { IBridge } from "./core/bridge.js";
 import { PluginRegistry } from "./plugins/registry.js";
 import { WatchEngine } from "./bell-tower/watch.js";
 import { startDashboard } from "./dashboard/server.js";
-import { SlackHopper } from "./hopper/slack.js";
+import { HttpHopper, SlackHopper, WebhookHopper, CronHopper, FsHopper } from "./hopper/index.js";
 import { loadConfig } from "./core/config.js";
 
 // ── Bridge ─────────────────────────────────────────────────────────────────────
@@ -90,6 +90,59 @@ const watchPersistPath =
 const watchEngine = new WatchEngine();
 await watchEngine.loadFromFile(watchPersistPath);
 
+// ── HttpHopper — inbound HTTP event intake on a dedicated port ─────────────────
+
+const httpHopper = new HttpHopper(bridge, {
+  port: config.hoppers.http.port,
+  host: config.hoppers.http.host,
+  pluginAdapters: registry.adapters,
+});
+await httpHopper.start();
+
+// ── WebhookHopper — HMAC-verified inbound webhooks ─────────────────────────────
+
+const webhookHopper = new WebhookHopper(bridge, {
+  port: config.hoppers.webhook.port,
+  host: config.hoppers.webhook.host,
+  channels: config.hoppers.webhook.channels,
+});
+if (Object.keys(config.hoppers.webhook.channels).length > 0) {
+  await webhookHopper.start();
+  console.log(
+    `[WebhookHopper] Channels: ${Object.keys(config.hoppers.webhook.channels).join(", ")}`,
+  );
+} else {
+  console.log("[WebhookHopper] No channels configured — skipping start");
+}
+
+// ── CronHopper — scheduled event emission ─────────────────────────────────────
+
+const cronHopper = new CronHopper(bridge, {
+  jobs: config.hoppers.cron.map((j) => ({
+    id: j.id,
+    intervalMs: j.intervalMs,
+    fireImmediately: j.fireImmediately,
+    event: { channel: j.channel, payload: j.payload },
+  })),
+});
+cronHopper.start();
+
+// ── FsHopper — filesystem change events ───────────────────────────────────────
+
+const fsHopper = new FsHopper(bridge, {
+  watches: config.hoppers.fs.map((w) => ({
+    path: w.path,
+    channel: w.channel,
+    recursive: w.recursive,
+    debounceMs: w.debounceMs,
+  })),
+});
+if (config.hoppers.fs.length > 0) {
+  fsHopper.start();
+} else {
+  console.log("[FsHopper] No watch paths configured — skipping start");
+}
+
 // ── Slack Socket Mode hopper (optional) ────────────────────────────────────────
 //
 // Activated when app_token + bot_token are set (config.yaml or env vars).
@@ -114,6 +167,10 @@ if (config.slack.appToken && config.slack.botToken) {
 
 async function shutdown(): Promise<void> {
   console.log("[main] Shutting down…");
+  await httpHopper.stop().catch(() => {});
+  await webhookHopper.stop().catch(() => {});
+  cronHopper.stop();
+  fsHopper.stop();
   await slackHopper?.stop().catch(() => {});
   await watchEngine.saveToFile(watchPersistPath).catch(() => {});
   await registry.unregisterAll().catch(() => {});
@@ -141,6 +198,8 @@ console.log(`GristMill dashboard listening at ${address}`);
 console.log(`  /api/watches       — Watch CRUD`);
 console.log(`  /api/plugins       — Plugin status`);
 console.log(`  /webhooks/slack    — Slack Events API inbound (HTTP, optional)`);
+console.log(`  /api/ecosystem     — Phase 4 portability & sharing`);
+console.log(`  [HttpHopper]       — http://${config.hoppers.http.host}:${config.hoppers.http.port}/events`);
 console.log(
   slackHopper
     ? `  [SlackHopper]      — Socket Mode active`
