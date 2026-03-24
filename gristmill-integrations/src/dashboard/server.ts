@@ -29,6 +29,7 @@ import { trainerRoutes } from "./routes/trainer.js";
 import { watchesRoutes } from "./routes/watches.js";
 import { pluginsRoutes } from "./routes/plugins.js";
 import { slackWebhookRoutes } from "./routes/slack-webhook.js";
+import { ecosystemRoutes } from "./routes/ecosystem.js";
 
 export interface DashboardConfig {
   /** Port to listen on. Default: 4000 */
@@ -106,6 +107,8 @@ export function createDashboardServer(
   app.register(triageRoutes,    { bridge, prefix: "/api/triage" });
   // API routes — distillation trainer (proxies to localhost:7432)
   app.register(trainerRoutes,   { prefix: "/api/trainer" });
+  // API routes — ecosystem (Phase 4: portability & sharing, proxies to localhost:7432)
+  app.register(ecosystemRoutes, { prefix: "/api/ecosystem" });
 
   // API routes — watches (optional, requires watchEngine)
   if (config.watchEngine) {
@@ -172,6 +175,7 @@ export function createDashboardServer(
         "/api/metrics/budget",
         "/api/metrics/health",
         "/api/triage",
+        "/api/ecosystem/status",
       ];
       if (config.watchEngine) api.push("/api/watches");
       if (config.pluginRegistry) api.push("/api/plugins");
