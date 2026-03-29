@@ -121,6 +121,50 @@ impl GristMillCore {
         })
     }
 
+    /// Build a core from a pre-constructed [`GristMillConfig`].
+    ///
+    /// Useful for tests and embeddings where the config is built programmatically
+    /// (e.g. pointing the workspace at a temporary directory) rather than loaded
+    /// from a file.
+    pub async fn from_config(cfg: GristMillConfig) -> Result<Self, CoreError> {
+        let workspace = cfg.core.workspace.clone();
+        info!(workspace = %workspace.display(), "GristMillCore initialising subsystems (from_config)");
+
+        let sieve_config = build_sieve_config(&cfg);
+        let sieve = Sieve::new(sieve_config.clone()).map_err(CoreError::Sieve)?;
+
+        let training_buffer = match &sieve_config.training_buffer_path {
+            Some(path) => TrainingBuffer::open(path).unwrap_or_else(|e| {
+                tracing::warn!(error = %e, "failed to open training buffer, using no-op");
+                TrainingBuffer::noop()
+            }),
+            None => TrainingBuffer::noop(),
+        };
+
+        let bus = Arc::new(EventBus::default());
+        let grinders_cfg = build_grinders_config(&cfg, &workspace);
+        let ledger_embedder = embedder::build_ledger_embedder(&grinders_cfg);
+        let ledger = Ledger::new(build_ledger_config(&cfg, &workspace), ledger_embedder)
+            .await
+            .map_err(CoreError::Ledger)?;
+        let hammer = Hammer::new(build_hammer_config(&cfg)).map_err(CoreError::Hammer)?;
+        let millwright = Millwright::new(
+            build_millwright_config(&cfg, &workspace),
+            Some(Arc::clone(&bus)),
+        )
+        .map_err(CoreError::Millwright)?;
+
+        info!("GristMillCore ready");
+        Ok(Self {
+            sieve,
+            ledger,
+            hammer,
+            millwright,
+            bus,
+            training_buffer,
+        })
+    }
+
     // ── Sieve ─────────────────────────────────────────────────────────────────
 
     pub async fn triage(&self, event: &GristEvent) -> Result<RouteDecision, CoreError> {

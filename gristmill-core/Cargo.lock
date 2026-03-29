@@ -927,12 +927,14 @@ name = "gristmill-daemon"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "grist-config",
  "grist-core",
  "grist-event",
  "grist-millwright",
  "rmp-serde",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "tracing",
  "tracing-subscriber",
