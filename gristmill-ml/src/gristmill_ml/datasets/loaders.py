@@ -7,7 +7,7 @@ graceful fallback to hardcoded examples when the library or network is unavailab
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
@@ -214,7 +214,6 @@ def load_mmlu(
         config = subject if subject != "all" else "all"
         ds = load_dataset("cais/mmlu", config, split=split, trust_remote_code=True)
         samples: list[BenchmarkSample] = []
-        choices_keys = ["A", "B", "C", "D"]
         for row in ds.select(range(min(n, len(ds)))):
             choices = row.get("choices", [])
             answer_idx = row.get("answer", 0)

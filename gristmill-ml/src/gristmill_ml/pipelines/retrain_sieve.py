@@ -215,7 +215,6 @@ class RetrainPipeline:
 
             # ── Step 2: Train ─────────────────────────────────────────────────
             from gristmill_ml.training.sieve_trainer import SieveTrainer
-            from gristmill_ml.experiments.tracking import ExperimentTracker
 
             logger.info(
                 "Step 2/7 — Training SieveTrainer (epochs=%d, experiment=%s) …",

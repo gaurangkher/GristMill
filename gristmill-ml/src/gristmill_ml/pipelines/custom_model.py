@@ -18,7 +18,6 @@ import csv
 import json
 import logging
 from pathlib import Path
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -150,7 +149,7 @@ class CustomModelPipeline:
     @staticmethod
     def _to_feedback_records(rows: list[dict]) -> list:
         """Convert raw rows to :class:`FeedbackRecord` objects for training."""
-        from gristmill_ml.datasets.feedback import FeedbackRecord, ROUTE_LABEL_MAP
+        from gristmill_ml.datasets.feedback import FeedbackRecord
 
         records = []
         for i, row in enumerate(rows):
@@ -279,8 +278,7 @@ class CustomModelPipeline:
         from torch.optim import AdamW
         from torch.optim.lr_scheduler import CosineAnnealingLR
         from torch.utils.data import DataLoader
-        from gristmill_ml.datasets.feedback import FeedbackDataset
-        from gristmill_ml.training.sieve_trainer import TrainResult, FEATURE_DIM, NUM_CLASSES
+        from gristmill_ml.training.sieve_trainer import TrainResult
 
         # Build synthetic dataset split
         random.seed(42)

@@ -10,12 +10,13 @@ from __future__ import annotations
 import logging
 import math
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
 import numpy as np
+from gristmill_ml.datasets.feedback import CHANNEL_ORDINAL
 
 logger = logging.getLogger(__name__)
 
@@ -109,8 +110,6 @@ class ComparisonReport:
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
 _LABEL_NAMES = ["LOCAL_ML", "RULES", "HYBRID", "LLM_NEEDED"]
-
-from gristmill_ml.datasets.feedback import CHANNEL_ORDINAL
 
 
 def _build_feature_vectors(
