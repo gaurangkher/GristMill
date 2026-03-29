@@ -58,8 +58,7 @@ class DaemonIpcClient:
             self._msgpack = msgpack
         except ImportError:
             logger.warning(
-                "msgpack not installed — hot-reload step skipped. "
-                "Install with: pip install msgpack"
+                "msgpack not installed — hot-reload step skipped. Install with: pip install msgpack"
             )
             self._use_json_fallback = True  # flag to skip
 
@@ -241,9 +240,7 @@ class RetrainPipeline:
             self.output_dir.mkdir(parents=True, exist_ok=True)
             tmp_onnx = self.output_dir / "intent-classifier-v1.candidate.onnx"
 
-            logger.info(
-                "Step 3/7 — Exporting ONNX (quantize=%s) → %s …", self.quantize, tmp_onnx
-            )
+            logger.info("Step 3/7 — Exporting ONNX (quantize=%s) → %s …", self.quantize, tmp_onnx)
             onnx_path = OnnxExporter.export_classifier(
                 trainer.model, tmp_onnx, quantize=self.quantize
             )
@@ -261,14 +258,14 @@ class RetrainPipeline:
 
             # validate_classifier_parity returns a dict (see validate.py line 107)
             passed = validation["passed"] if isinstance(validation, dict) else validation.passed
-            max_diff = validation["max_diff"] if isinstance(validation, dict) else validation.max_diff
+            max_diff = (
+                validation["max_diff"] if isinstance(validation, dict) else validation.max_diff
+            )
             outcome["metrics"]["parity_max_diff"] = max_diff
             outcome["metrics"]["parity_passed"] = passed
 
             if not passed:
-                raise RuntimeError(
-                    f"ONNX parity check failed: max_diff={max_diff:.6f}"
-                )
+                raise RuntimeError(f"ONNX parity check failed: max_diff={max_diff:.6f}")
             logger.info("Parity check passed (max_diff=%.8f)", max_diff)
 
             if self.dry_run:
@@ -289,9 +286,7 @@ class RetrainPipeline:
 
             # ── Step 6: Hot-reload ────────────────────────────────────────────
             if self.reload_daemon:
-                logger.info(
-                    "Step 6/7 — Sending hot-reload IPC to daemon (%s) …", self.daemon_sock
-                )
+                logger.info("Step 6/7 — Sending hot-reload IPC to daemon (%s) …", self.daemon_sock)
                 ipc = DaemonIpcClient(self.daemon_sock)
                 try:
                     resp = ipc.models_reload("sieve")
@@ -352,18 +347,14 @@ def main() -> None:  # pragma: no cover
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("--epochs", type=int, default=10, help="Training epochs")
-    parser.add_argument(
-        "--min-records", type=int, default=200, help="Minimum feedback records"
-    )
+    parser.add_argument("--min-records", type=int, default=200, help="Minimum feedback records")
     parser.add_argument(
         "--output-dir",
         type=Path,
         default=Path("~/.gristmill/models").expanduser(),
         help="ONNX model output directory",
     )
-    parser.add_argument(
-        "--no-quantize", action="store_true", help="Export fp32 instead of INT8"
-    )
+    parser.add_argument("--no-quantize", action="store_true", help="Export fp32 instead of INT8")
     parser.add_argument(
         "--no-reload",
         action="store_true",

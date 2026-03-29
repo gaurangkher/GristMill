@@ -137,7 +137,9 @@ def _build_feature_vectors(
             "Install with: pip install sentence-transformers"
         ) from exc
 
-    model_name_or_path = str(embedder_path) if embedder_path else "sentence-transformers/all-MiniLM-L6-v2"
+    model_name_or_path = (
+        str(embedder_path) if embedder_path else "sentence-transformers/all-MiniLM-L6-v2"
+    )
     logger.info("Loading embedder: %s", model_name_or_path)
     embedder = SentenceTransformer(model_name_or_path)
     embeddings: np.ndarray = embedder.encode(
@@ -188,6 +190,7 @@ def _build_feature_vectors(
         # [391] ambiguity score
         if tokens:
             from collections import Counter
+
             max_freq = Counter(tokens).most_common(1)[0][1]
             ambiguity = 1.0 - max_freq / len(tokens)
         else:
@@ -208,8 +211,7 @@ def _load_onnx_session(model_path: Path):
         import onnxruntime as ort  # type: ignore[import]
     except ImportError as exc:
         raise RuntimeError(
-            "onnxruntime is required for model comparison. "
-            "Install with: pip install onnxruntime"
+            "onnxruntime is required for model comparison. Install with: pip install onnxruntime"
         ) from exc
 
     opts = ort.SessionOptions()
@@ -294,9 +296,7 @@ def compare_models(
     if not texts:
         raise ValueError("texts must not be empty")
 
-    logger.info(
-        "Building feature vectors for %d samples (FEATURE_DIM=%d)", len(texts), FEATURE_DIM
-    )
+    logger.info("Building feature vectors for %d samples (FEATURE_DIM=%d)", len(texts), FEATURE_DIM)
     features = _build_feature_vectors(texts, embedder_path)
 
     logger.info("Loading candidate model: %s", candidate.path)

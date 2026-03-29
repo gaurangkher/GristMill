@@ -102,8 +102,7 @@ class CustomModelPipeline:
         missing = {"text", "label"} - columns
         if missing:
             raise ValueError(
-                f"Input data is missing required columns: {missing}. "
-                "Expected 'text' and 'label'."
+                f"Input data is missing required columns: {missing}. Expected 'text' and 'label'."
             )
 
     def load_data(self) -> list[dict]:
@@ -131,10 +130,7 @@ class CustomModelPipeline:
         # Validate label values
         invalid = {r["label"] for r in rows if r["label"] not in _VALID_LABELS}
         if invalid:
-            raise ValueError(
-                f"Invalid label values: {invalid}. "
-                f"Expected one of: {_VALID_LABELS}"
-            )
+            raise ValueError(f"Invalid label values: {invalid}. Expected one of: {_VALID_LABELS}")
 
         logger.info(
             "Loaded %d records from %s (labels: %s)",
@@ -210,9 +206,7 @@ class CustomModelPipeline:
             dataset.records = feedback_records
 
             # ── Step 3: Train ─────────────────────────────────────────────────
-            logger.info(
-                "Step 3/4 — Training custom classifier (epochs=%d) …", self.epochs
-            )
+            logger.info("Step 3/4 — Training custom classifier (epochs=%d) …", self.epochs)
             self.output_dir.mkdir(parents=True, exist_ok=True)
             trainer = SieveTrainer(
                 feedback_dir=self.data_path.parent,
@@ -222,9 +216,7 @@ class CustomModelPipeline:
             # Inject our dataset directly to bypass feedback file loading
             train_result = self._train_on_records(trainer, feedback_records)
             outcome["classification_report"] = train_result.classification_report
-            logger.info(
-                "Training complete: val_acc=%.4f", train_result.best_val_accuracy
-            )
+            logger.info("Training complete: val_acc=%.4f", train_result.best_val_accuracy)
 
             # ── Step 4: Export ────────────────────────────────────────────────
             from gristmill_ml.export.onnx_export import OnnxExporter
@@ -302,9 +294,7 @@ class CustomModelPipeline:
         train_items = records_to_items(train_records)
         val_items = records_to_items(val_records)
 
-        logger.info(
-            "Custom training split — train: %d, val: %d", len(train_items), len(val_items)
-        )
+        logger.info("Custom training split — train: %d, val: %d", len(train_items), len(val_items))
 
         # Feature extraction
         X_train = trainer.feature_extractor.extract_batch(train_items)
@@ -317,12 +307,8 @@ class CustomModelPipeline:
         X_val_t = torch.from_numpy(X_val).float()
         y_val_t = torch.from_numpy(y_val).long()
 
-        train_loader = DataLoader(
-            list(zip(X_train_t, y_train_t)), batch_size=64, shuffle=True
-        )
-        val_loader = DataLoader(
-            list(zip(X_val_t, y_val_t)), batch_size=64, shuffle=False
-        )
+        train_loader = DataLoader(list(zip(X_train_t, y_train_t)), batch_size=64, shuffle=True)
+        val_loader = DataLoader(list(zip(X_val_t, y_val_t)), batch_size=64, shuffle=False)
 
         criterion = nn.CrossEntropyLoss()
         optimizer = AdamW(trainer.model.parameters(), lr=1e-3, weight_decay=1e-4)

@@ -248,8 +248,7 @@ def main() -> None:  # pragma: no cover
 
         n_calib = 64
         calibration_data = [
-            {"features": np.random.randn(1, FEATURE_DIM).astype(np.float32)}
-            for _ in range(n_calib)
+            {"features": np.random.randn(1, FEATURE_DIM).astype(np.float32)} for _ in range(n_calib)
         ]
         out = OnnxQuantizer.quantize_static(
             args.input,
