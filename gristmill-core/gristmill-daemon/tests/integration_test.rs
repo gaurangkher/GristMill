@@ -210,7 +210,11 @@ async fn handle_test_connection(mut stream: UnixStream, core: Arc<GristMillCore>
                 let content = params["content"].as_str().unwrap_or("").to_owned();
                 let tags: Vec<String> = params["tags"]
                     .as_array()
-                    .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|v| v.as_str().map(String::from))
+                            .collect()
+                    })
                     .unwrap_or_default();
                 match core.remember(content, tags).await {
                     Ok(id) => Ok(Value::String(id)),
@@ -270,7 +274,10 @@ async fn health_returns_ok() {
 
     let resp = client.call("health", None).await;
     assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
-    assert_eq!(resp.ok.as_ref().and_then(|v| v["status"].as_str()), Some("ok"));
+    assert_eq!(
+        resp.ok.as_ref().and_then(|v| v["status"].as_str()),
+        Some("ok")
+    );
 }
 
 #[tokio::test]
@@ -295,7 +302,10 @@ async fn triage_returns_route_decision() {
     .to_string();
 
     let resp = client
-        .call("triage", Some(serde_json::json!({ "event_json": event_json })))
+        .call(
+            "triage",
+            Some(serde_json::json!({ "event_json": event_json })),
+        )
         .await;
 
     assert!(resp.error.is_none(), "triage error: {:?}", resp.error);
@@ -355,10 +365,7 @@ async fn remember_and_get_round_trip() {
         get_resp.error
     );
     let memory = get_resp.ok.expect("get_memory returned null");
-    assert!(
-        !memory.is_null(),
-        "memory not found by id {mem_id}"
-    );
+    assert!(!memory.is_null(), "memory not found by id {mem_id}");
     assert!(
         memory["content"]
             .as_str()
@@ -396,7 +403,11 @@ async fn pipeline_ids_empty_on_fresh_core() {
 
     let resp = client.call("pipeline_ids", None).await;
     assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
-    let ids = resp.ok.as_ref().and_then(|v| v.as_array()).expect("expected array");
+    let ids = resp
+        .ok
+        .as_ref()
+        .and_then(|v| v.as_array())
+        .expect("expected array");
     assert!(ids.is_empty(), "expected no pipelines on fresh core");
 }
 
@@ -429,5 +440,8 @@ async fn multiple_sequential_requests_on_one_connection() {
     // Health again
     let r3 = client.call("health", None).await;
     assert!(r3.error.is_none());
-    assert_eq!(r3.ok.as_ref().and_then(|v| v["status"].as_str()), Some("ok"));
+    assert_eq!(
+        r3.ok.as_ref().and_then(|v| v["status"].as_str()),
+        Some("ok")
+    );
 }
