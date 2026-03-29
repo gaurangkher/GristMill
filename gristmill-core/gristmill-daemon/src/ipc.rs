@@ -70,6 +70,16 @@ pub enum IpcRequest {
         channel: String,
         payload_json: String,
     },
+    /// List loaded models and their status.
+    ModelsList,
+    /// Hot-reload a named model (pass `"sieve"` for the ONNX classifier).
+    ModelsReload { model_id: String },
+    /// Return memory tier and routing-cache statistics.
+    MemoryStats,
+    /// Acknowledge a manual compaction request (background compactor does the work).
+    Compact,
+    /// Return aggregate system metrics (routing, cache, LLM budget).
+    Metrics,
 }
 
 /// Wrapper that pairs a caller-chosen correlation id with a request.
@@ -210,6 +220,19 @@ async fn dispatch(core: &Arc<GristMillCore>, envelope: IpcEnvelope) -> IpcRespon
                 }
             }
         },
+
+        IpcRequest::ModelsList => IpcResponse::ok(id, core.models_list()),
+
+        IpcRequest::ModelsReload { model_id } => match core.models_reload(&model_id) {
+            Ok(()) => IpcResponse::ok(id, serde_json::json!({ "reloaded": model_id })),
+            Err(e) => IpcResponse::err(id, e.to_string()),
+        },
+
+        IpcRequest::MemoryStats => IpcResponse::ok(id, core.memory_stats()),
+
+        IpcRequest::Compact => IpcResponse::ok(id, core.compact()),
+
+        IpcRequest::Metrics => IpcResponse::ok(id, core.metrics()),
     }
 }
 
