@@ -322,6 +322,96 @@ impl GristMillCore {
         self.millwright.pipeline_ids()
     }
 
+    // ── Models ────────────────────────────────────────────────────────────────
+
+    /// Return a JSON snapshot of loaded models and sieve classifier status.
+    pub fn models_list(&self) -> Value {
+        let cache = self.sieve.cache_stats();
+        serde_json::json!({
+            "models": [
+                {
+                    "id": "sieve-classifier",
+                    "type": "onnx",
+                    "status": "loaded",
+                    "confidence_threshold": self.sieve.confidence_threshold(),
+                    "cache": {
+                        "exact_size": cache.exact_size,
+                        "semantic_size": cache.semantic_size,
+                    }
+                }
+            ],
+            "hammer": {
+                "cache_size": self.hammer.cache_size(),
+            }
+        })
+    }
+
+    /// Hot-reload the named model. Currently supports `"sieve"`.
+    pub fn models_reload(&self, model_id: &str) -> Result<(), CoreError> {
+        match model_id {
+            "sieve" => self.sieve.hot_reload_model().map_err(CoreError::Sieve),
+            other => Err(CoreError::Runtime(format!("unknown model id: {other}"))),
+        }
+    }
+
+    /// Return a JSON snapshot of memory-tier and routing-cache statistics.
+    pub fn memory_stats(&self) -> Value {
+        let cache = self.sieve.cache_stats();
+        let budget = self.hammer.get_budget();
+        serde_json::json!({
+            "routing_cache": {
+                "exact_hits": cache.exact_hits,
+                "semantic_hits": cache.semantic_hits,
+                "misses": cache.misses,
+                "hit_rate": cache.hit_rate,
+                "exact_size": cache.exact_size,
+                "semantic_size": cache.semantic_size,
+            },
+            "feedback_records_sent": self.sieve.feedback_records_sent(),
+            "hammer_budget": {
+                "daily_used": budget.daily_used,
+                "daily_limit": budget.daily_limit,
+                "daily_remaining": budget.daily_remaining,
+            }
+        })
+    }
+
+    /// Acknowledge a manual compaction trigger. The background compactor handles
+    /// the actual warm→cold flush; this method returns immediately.
+    pub fn compact(&self) -> Value {
+        serde_json::json!({
+            "status": "ok",
+            "note": "background compactor will flush warm→cold on next cycle"
+        })
+    }
+
+    /// Return aggregate system metrics (routing cache, LLM budget, feedback).
+    pub fn metrics(&self) -> Value {
+        let cache = self.sieve.cache_stats();
+        let budget = self.hammer.get_budget();
+        serde_json::json!({
+            "sieve": {
+                "confidence_threshold": self.sieve.confidence_threshold(),
+                "routing_cache": {
+                    "exact_hits": cache.exact_hits,
+                    "semantic_hits": cache.semantic_hits,
+                    "misses": cache.misses,
+                    "hit_rate": cache.hit_rate,
+                },
+                "feedback_records_sent": self.sieve.feedback_records_sent(),
+            },
+            "hammer": {
+                "cache_size": self.hammer.cache_size(),
+                "daily_tokens_used": budget.daily_used,
+                "daily_token_limit": budget.daily_limit,
+                "daily_tokens_remaining": budget.daily_remaining,
+                "monthly_tokens_used": budget.monthly_used,
+                "monthly_token_limit": budget.monthly_limit,
+            },
+            "pipelines_registered": self.pipeline_ids().len(),
+        })
+    }
+
     // ── Bus ───────────────────────────────────────────────────────────────────
 
     pub fn subscribe(&self, topic: &str) -> grist_bus::Subscription {
