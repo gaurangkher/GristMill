@@ -74,4 +74,31 @@ export async function metricsRoutes(
       timestamp: new Date().toISOString(),
     });
   });
+
+  app.get("/routing", async (_req, reply) => {
+    // IBridge may not yet expose metrics() — call via the underlying IpcBridge
+    // cast or check for the method's existence
+    const b = bridge as unknown as { metrics?: () => Promise<unknown> };
+    if (typeof b.metrics === "function") {
+      const data = await b.metrics();
+      return reply.send(data);
+    }
+    return reply.send({
+      sieve: {
+        confidence_threshold: 0,
+        routing_cache: { exact_hits: 0, semantic_hits: 0, misses: 0, hit_rate: 0 },
+        feedback_records_sent: 0,
+      },
+      hammer: {
+        cache_size: 0,
+        daily_tokens_used: 0,
+        daily_token_limit: 0,
+        daily_tokens_remaining: 0,
+        monthly_tokens_used: 0,
+        monthly_token_limit: 0,
+      },
+      pipelines_registered: 0,
+      _stub: true,
+    });
+  });
 }

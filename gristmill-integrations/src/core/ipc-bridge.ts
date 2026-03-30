@@ -301,4 +301,10 @@ export class IpcBridge implements IBridge {
       return false;
     }
   }
+
+  /** Retrieve routing / budget metrics from the daemon. */
+  async metrics(): Promise<unknown> {
+    const result = await this.send({ method: "metrics", params: {} });
+    return result;
+  }
 }

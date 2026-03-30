@@ -21,6 +21,19 @@ async function post<T>(path: string, body?: unknown): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+async function patch<T>(path: string, body?: unknown): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({})) as { error?: string; detail?: string };
+    throw new Error(err.detail ?? err.error ?? `${path} → ${res.status}`);
+  }
+  return res.json() as Promise<T>;
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface HealthInfo {
@@ -86,6 +99,59 @@ export interface EcosystemStatus {
   };
 }
 
+// ── Memory types ──────────────────────────────────────────────────────────────
+
+export interface MemoryItem {
+  id: string;
+  content: string;
+  tags: string[];
+  createdAtMs: number;
+  tier: string;
+}
+
+export interface RankedMemoryItem {
+  memory: MemoryItem;
+  score: number;
+}
+
+// ── Watch type ────────────────────────────────────────────────────────────────
+
+export interface WatchItem {
+  id: string;
+  name: string;
+  topic: string;
+  condition: string;
+  channelIds: string[];
+  enabled: boolean;
+  cooldownMs: number;
+  createdAt: string;
+}
+
+// ── Routing metrics type ──────────────────────────────────────────────────────
+
+export interface RoutingMetrics {
+  sieve: {
+    confidence_threshold: number;
+    routing_cache: {
+      exact_hits: number;
+      semantic_hits: number;
+      misses: number;
+      hit_rate: number;
+    };
+    feedback_records_sent: number;
+  };
+  hammer: {
+    cache_size: number;
+    daily_tokens_used: number;
+    daily_token_limit: number;
+    daily_tokens_remaining: number;
+    monthly_tokens_used: number;
+    monthly_token_limit: number;
+  };
+  pipelines_registered: number;
+  _stub?: boolean;
+}
+
 // ── API calls ─────────────────────────────────────────────────────────────────
 
 export const api = {
@@ -109,4 +175,25 @@ export const api = {
     post<{ ok: boolean; bootstrapped: boolean }>(`/api/ecosystem/community/bootstrap/${domain}?force=${force}`),
   ecosystemPush: (domain: string) =>
     post<{ ok: boolean; adapter_id: string }>(`/api/ecosystem/community/push/${domain}`),
+
+  // ── Memory ─────────────────────────────────────────────────────────────────
+
+  memoryRecall: (query: string, limit = 10) =>
+    post<RankedMemoryItem[]>("/api/memory/recall", { query, limit }),
+  memoryRemember: (content: string, tags: string[] = []) =>
+    post<{ id: string }>("/api/memory/remember", { content, tags }),
+  memoryGet: (id: string) => get<MemoryItem | null>(`/api/memory/${id}`),
+
+  // ── Watches ────────────────────────────────────────────────────────────────
+
+  watchesList: () => get<WatchItem[]>("/api/watches"),
+  watchCreate: (w: Omit<WatchItem, "id" | "createdAt">) =>
+    post<WatchItem>("/api/watches", w),
+  watchUpdate: (id: string, patchBody: Partial<Omit<WatchItem, "id">>) =>
+    patch<WatchItem>(`/api/watches/${id}`, patchBody),
+  watchDelete: (id: string) => fetch(`/api/watches/${id}`, { method: "DELETE" }),
+
+  // ── Metrics ────────────────────────────────────────────────────────────────
+
+  metricsRouting: () => get<RoutingMetrics>("/api/metrics/routing"),
 };

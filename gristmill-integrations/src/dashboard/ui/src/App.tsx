@@ -3,14 +3,20 @@ import OverviewPage from "./pages/OverviewPage.js";
 import TrainerPage from "./pages/TrainerPage.js";
 import PipelinesPage from "./pages/PipelinesPage.js";
 import EcosystemPage from "./pages/EcosystemPage.js";
+import MemoryPage from "./pages/MemoryPage.js";
+import MetricsPage from "./pages/MetricsPage.js";
+import WatchesPage from "./pages/WatchesPage.js";
 
-type Tab = "overview" | "trainer" | "pipelines" | "ecosystem";
+type Tab = "overview" | "trainer" | "pipelines" | "ecosystem" | "memory" | "metrics" | "watches";
 
 const TABS: { id: Tab; label: string }[] = [
-  { id: "overview",  label: "Overview" },
-  { id: "trainer",   label: "Trainer" },
-  { id: "pipelines", label: "Pipelines" },
-  { id: "ecosystem", label: "Ecosystem" },
+  { id: "overview",   label: "Overview" },
+  { id: "trainer",    label: "Trainer" },
+  { id: "pipelines",  label: "Pipelines" },
+  { id: "ecosystem",  label: "Ecosystem" },
+  { id: "memory",     label: "Memory" },
+  { id: "metrics",    label: "Metrics" },
+  { id: "watches",    label: "Watches" },
 ];
 
 export default function App() {
@@ -55,6 +61,9 @@ export default function App() {
         {tab === "trainer"   && <TrainerPage />}
         {tab === "pipelines" && <PipelinesPage />}
         {tab === "ecosystem" && <EcosystemPage />}
+        {tab === "memory"    && <MemoryPage />}
+        {tab === "metrics"   && <MetricsPage />}
+        {tab === "watches"   && <WatchesPage />}
       </main>
 
       <footer style={{
