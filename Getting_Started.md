@@ -22,6 +22,7 @@ retraining all happen in the same unified system.
 8. [How to train the Sieve](#8-how-to-train-the-sieve)
 9. [Notifications (Bell Tower)](#9-notifications-bell-tower)
 10. [Observability](#10-observability)
+11. [CLI Quick Reference](#11-cli-quick-reference)
 
 ---
 
@@ -189,6 +190,37 @@ docker run -p 3000:3000 \
   -e ANTHROPIC_API_KEY="sk-ant-..." \
   -v ~/.gristmill:/data/gristmill \
   gristmill:latest
+```
+
+---
+
+### Option D — Docker Compose *(local dev with full stack)*
+
+```bash
+# Core service only
+docker compose up -d
+
+# Core + Ollama (local LLM) + MLflow (experiment tracking)
+docker compose --profile full up -d
+
+# Tail logs
+docker compose logs -f gristmill
+
+# Stop everything
+docker compose down
+```
+
+Services:
+| Service | Profile | Port | Purpose |
+|---------|---------|------|---------|
+| `gristmill` | default | 3000 | Rust daemon + TypeScript shell |
+| `ollama` | `full` | 11434 | Local LLM (llama3.1:8b) |
+| `mlflow` | `full` | 5000 | Experiment tracking UI |
+
+Data is persisted to a `gristmill-data` Docker volume. Pass secrets via environment:
+
+```bash
+ANTHROPIC_API_KEY=sk-ant-... docker compose up -d
 ```
 
 ---
@@ -894,6 +926,48 @@ cd gristmill-ml && pytest tests/ -v
 
 # TypeScript — unit tests
 cd gristmill-integrations && pnpm test
+```
+
+---
+
+## 11. CLI Quick Reference
+
+All subcommands connect to the running daemon via the Unix socket.
+
+```bash
+# Daemon lifecycle
+gristmill-cli start                        # start daemon in background
+gristmill-cli stop                         # graceful shutdown
+gristmill-cli status                       # socket alive, uptime, version
+gristmill-cli doctor                       # checks models, config, socket, budget
+
+# Triage
+gristmill-cli triage "Fix this SQL query"
+gristmill-cli triage "Critical outage on prod" --priority critical
+
+# Memory
+gristmill-cli memory remember "Deploy via: kubectl apply -f k8s/" --tags infra,k8s
+gristmill-cli memory search "kubernetes deployment"
+gristmill-cli memory get 01HXYZ...
+
+# Models
+gristmill-cli models list
+gristmill-cli models reload sieve          # hot-reload after retraining
+
+# Pipelines
+gristmill-cli pipeline list
+gristmill-cli pipeline run infra-alert-pipeline --event '{"text":"disk 95%"}'
+
+# Watches
+gristmill-cli watch list
+gristmill-cli watch create --name "Budget alert" --topic hammer.budget --condition "pct_used > 80" --channels slack
+gristmill-cli watch delete <id>
+
+# Retrain
+gristmill-cli train sieve --epochs 10     # retrain + export + hot-reload
+
+# Metrics snapshot
+gristmill-cli metrics
 ```
 
 ---
