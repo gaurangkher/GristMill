@@ -1,0 +1,134 @@
+# GristMill v2 — Docker Compose
+#
+# Profiles
+#   (default)          gristmill only — suitable for CI and minimal local dev
+#   --profile ollama   + Ollama local LLM (llama3.1:8b)
+#   --profile mlflow   + MLflow tracking server
+#   --profile full     + both Ollama and MLflow
+#
+# Quick start:
+#   docker compose up                        # minimal
+#   docker compose --profile full up         # with Ollama + MLflow
+#
+# Environment:
+#   Copy .env.example → .env and fill in secrets before starting.
+
+services:
+
+  # ── GristMill (daemon + integrations shell) ───────────────────────────────
+  gristmill:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BUILD_DATE: "${BUILD_DATE:-}"
+        GIT_SHA: "${GIT_SHA:-dev}"
+    image: gristmill:local
+    container_name: gristmill
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:3000"
+    volumes:
+      - gristmill_data:/data/gristmill
+      # Mount a local config file if it exists (optional override)
+      - type: bind
+        source: ${GRISTMILL_CONFIG_PATH:-/dev/null}
+        target: /data/gristmill/config.yaml
+        read_only: true
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      HOST: "0.0.0.0"
+      GRISTMILL_CONFIG: /data/gristmill/config.yaml
+      GRISTMILL_SOCK: /data/gristmill/gristmill.sock
+      # LLM providers — set in .env
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      # Notification channels — set in .env
+      SLACK_WEBHOOK_URL: "${SLACK_WEBHOOK_URL:-}"
+      SLACK_BOT_TOKEN: "${SLACK_BOT_TOKEN:-}"
+      SLACK_SIGNING_SECRET: "${SLACK_SIGNING_SECRET:-}"
+      # Ollama endpoint (used when ollama profile is active)
+      OLLAMA_HOST: "${OLLAMA_HOST:-http://ollama:11434}"
+      # MLflow tracking URI (used when mlflow profile is active)
+      MLFLOW_TRACKING_URI: "${MLFLOW_TRACKING_URI:-http://mlflow:5000}"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "require('http').get('http://localhost:3000/api/metrics/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    depends_on:
+      ollama:
+        condition: service_healthy
+        required: false
+      mlflow:
+        condition: service_healthy
+        required: false
+    networks:
+      - gristmill_net
+
+  # ── Ollama local LLM (profile: ollama / full) ─────────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    container_name: gristmill_ollama
+    profiles: [ollama, full]
+    restart: unless-stopped
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    environment:
+      OLLAMA_KEEP_ALIVE: "5m"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 5
+    networks:
+      - gristmill_net
+
+  # ── MLflow experiment tracking (profile: mlflow / full) ───────────────────
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.13.2
+    container_name: gristmill_mlflow
+    profiles: [mlflow, full]
+    restart: unless-stopped
+    command:
+      - mlflow
+      - server
+      - --host=0.0.0.0
+      - --port=5000
+      - --backend-store-uri=sqlite:///mlflow/mlruns.db
+      - --default-artifact-root=/mlflow/artifacts
+    ports:
+      - "${MLFLOW_PORT:-5000}:5000"
+    volumes:
+      - mlflow_data:/mlflow
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:5000/health"]
+      interval: 20s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    networks:
+      - gristmill_net
+
+# ── Volumes ───────────────────────────────────────────────────────────────────
+volumes:
+  gristmill_data:
+    driver: local
+  ollama_models:
+    driver: local
+  mlflow_data:
+    driver: local
+
+# ── Networks ──────────────────────────────────────────────────────────────────
+networks:
+  gristmill_net:
+    driver: bridge
