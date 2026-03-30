@@ -248,8 +248,10 @@ jobs:
           echo "$RESP" | python3 -c "
           import json, sys
           d = json.load(sys.stdin)
-          assert isinstance(d, list), f'expected array, got: {d}'
-          print(f'PASS: pipelines returned {len(d)} id(s)')
+          # Route returns { pipelines: [...] } or bare array — accept both
+          ids = d['pipelines'] if isinstance(d, dict) and 'pipelines' in d else d
+          assert isinstance(ids, list), f'expected array, got: {d}'
+          print(f'PASS: pipelines returned {len(ids)} id(s)')
           "
 
       - name: Ecosystem status
@@ -283,14 +285,14 @@ jobs:
 
       - name: Validate compose file (no build, just parse)
         run: |
-          # Ensure all service definitions are valid
-          docker compose config | python3 -c "
+          # --profile full expands profiled services so ollama + mlflow are visible
+          docker compose --profile full config | python3 -c "
           import sys, yaml
           cfg = yaml.safe_load(sys.stdin)
           services = list(cfg.get('services', {}).keys())
           print(f'Services defined: {services}')
           assert 'gristmill' in services, 'gristmill service missing'
-          assert 'ollama' in cfg['services'], 'ollama service missing'
-          assert 'mlflow' in cfg['services'], 'mlflow service missing'
+          assert 'ollama' in services, 'ollama service missing'
+          assert 'mlflow' in services, 'mlflow service missing'
           print('PASS: compose config is valid')
           "
