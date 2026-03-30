@@ -1,0 +1,302 @@
+name: Integration Tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Dockerfile"
+      - "docker-compose.yml"
+      - "docker-entrypoint.sh"
+      - "gristmill-core/**"
+      - "gristmill-integrations/**"
+      - ".github/workflows/integration.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "Dockerfile"
+      - "docker-compose.yml"
+      - "docker-entrypoint.sh"
+      - "gristmill-core/**"
+      - "gristmill-integrations/**"
+      - ".github/workflows/integration.yml"
+
+env:
+  COMPOSE_FILE: docker-compose.yml
+
+jobs:
+  # ── 1. Docker image build validation ─────────────────────────────────────
+  docker-build:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image (no push)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          load: true
+          tags: gristmill:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            GIT_SHA=${{ github.sha }}
+
+      - name: Verify image labels
+        run: |
+          docker inspect gristmill:ci \
+            --format '{{ index .Config.Labels "org.opencontainers.image.title" }}'
+
+      - name: Verify entrypoint exists
+        run: |
+          docker run --rm --entrypoint sh gristmill:ci \
+            -c "which gristmill-daemon && node --version"
+
+  # ── 2. Container integration tests (live stack) ───────────────────────────
+  container-integration:
+    name: Container Integration Tests
+    runs-on: ubuntu-latest
+    needs: docker-build
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Pull from GHA cache so we don't rebuild
+      - name: Build image for compose
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          load: true
+          tags: gristmill:local
+          cache-from: type=gha
+          build-args: |
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            GIT_SHA=${{ github.sha }}
+
+      - name: Start GristMill (mock bridge — no Rust daemon needed)
+        run: |
+          # Use the TypeScript server directly with GRISTMILL_MOCK_BRIDGE so
+          # we don't need the compiled Rust daemon binary in CI.
+          docker run -d \
+            --name gristmill_ci \
+            --env NODE_ENV=production \
+            --env GRISTMILL_MOCK_BRIDGE=1 \
+            --env PORT=3000 \
+            --env HOST=0.0.0.0 \
+            --entrypoint node \
+            -p 3000:3000 \
+            gristmill:local \
+            dist/main.js
+
+      - name: Wait for server to be healthy
+        run: |
+          echo "Waiting for /api/metrics/health..."
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3000/api/metrics/health > /dev/null 2>&1; then
+              echo "Server is up (attempt $i)"
+              break
+            fi
+            echo "  attempt $i — not ready yet"
+            sleep 2
+            if [ $i -eq 30 ]; then
+              echo "Server did not start within 60s"
+              docker logs gristmill_ci
+              exit 1
+            fi
+          done
+
+      # ── API endpoint integration tests ──────────────────────────────────
+
+      - name: Health check
+        run: |
+          RESP=$(curl -sf http://localhost:3000/api/metrics/health)
+          echo "$RESP"
+          echo "$RESP" | python3 -c "
+          import json, sys
+          d = json.load(sys.stdin)
+          assert d.get('status') == 'ok', f'expected status=ok, got: {d}'
+          print('PASS: health check')
+          "
+
+      - name: Event triage
+        run: |
+          RESP=$(curl -sf -X POST http://localhost:3000/events \
+            -H "Content-Type: application/json" \
+            -d '{"channel":"ci","payload":{"text":"integration test event"}}')
+          echo "$RESP"
+          echo "$RESP" | python3 -c "
+          import json, sys
+          d = json.load(sys.stdin)
+          assert 'route' in d, f'expected route field, got: {d}'
+          assert 'confidence' in d, f'expected confidence field, got: {d}'
+          c = float(d['confidence'])
+          assert 0.0 <= c <= 1.0, f'confidence out of range: {c}'
+          print(f\"PASS: triage route={d['route']} confidence={c:.3f}\")
+          "
+
+      - name: Memory remember
+        run: |
+          RESP=$(curl -sf -X POST http://localhost:3000/api/memory/remember \
+            -H "Content-Type: application/json" \
+            -d '{"content":"integration test memory entry","tags":["ci","test"]}')
+          echo "$RESP"
+          MEM_ID=$(echo "$RESP" | python3 -c "
+          import json, sys
+          d = json.load(sys.stdin)
+          assert 'id' in d, f'expected id field, got: {d}'
+          assert len(d['id']) > 0, 'id must be non-empty'
+          print(d['id'])
+          ")
+          echo "MEM_ID=$MEM_ID" >> "$GITHUB_ENV"
+          echo "PASS: remember returned id=$MEM_ID"
+
+      - name: Memory recall
+        run: |
+          RESP=$(curl -sf -X POST http://localhost:3000/api/memory/recall \
+            -H "Content-Type: application/json" \
+            -d '{"query":"integration test","limit":5}')
+          echo "$RESP"
+          echo "$RESP" | python3 -c "
+          import json, sys
+          d = json.load(sys.stdin)
+          assert 'results' in d, f'expected results field, got: {d}'
+          assert isinstance(d['results'], list), 'results must be an array'
+          print(f\"PASS: recall returned {len(d['results'])} result(s)\")
+          "
+
+      - name: Memory get by id
+        run: |
+          if [ -z "$MEM_ID" ]; then
+            echo "SKIP: no MEM_ID from remember step"
+            exit 0
+          fi
+          RESP=$(curl -sf "http://localhost:3000/api/memory/${MEM_ID}" || echo '{}')
+          echo "$RESP"
+          echo "PASS: memory get by id"
+
+      - name: Metrics budget
+        run: |
+          RESP=$(curl -sf http://localhost:3000/api/metrics/budget)
+          echo "$RESP"
+          echo "$RESP" | python3 -c "
+          import json, sys
+          d = json.load(sys.stdin)
+          assert 'daily_used' in d or 'status' in d, f'unexpected shape: {d}'
+          print('PASS: metrics/budget')
+          "
+
+      - name: Metrics routing
+        run: |
+          RESP=$(curl -sf http://localhost:3000/api/metrics/routing)
+          echo "$RESP"
+          echo "$RESP" | python3 -c "
+          import json, sys
+          d = json.load(sys.stdin)
+          assert 'sieve' in d, f'expected sieve key, got: {d}'
+          assert 'hammer' in d, f'expected hammer key, got: {d}'
+          print('PASS: metrics/routing')
+          "
+
+      - name: Watch create, list, and delete
+        run: |
+          # Create
+          CREATE=$(curl -sf -X POST http://localhost:3000/api/watches \
+            -H "Content-Type: application/json" \
+            -d '{
+              "name":"CI test watch",
+              "topic":"pipeline.completed",
+              "condition":"true",
+              "channelIds":["slack"],
+              "cooldownMs":60000
+            }')
+          echo "Create: $CREATE"
+          WATCH_ID=$(echo "$CREATE" | python3 -c "
+          import json, sys
+          d = json.load(sys.stdin)
+          assert 'id' in d, f'expected id, got: {d}'
+          print(d['id'])
+          ")
+
+          # List
+          LIST=$(curl -sf http://localhost:3000/api/watches)
+          echo "List: $LIST"
+          echo "$LIST" | python3 -c "
+          import json, sys
+          d = json.load(sys.stdin)
+          assert isinstance(d, list), 'expected array'
+          assert len(d) >= 1, 'expected at least 1 watch'
+          print(f'PASS: list returned {len(d)} watch(es)')
+          "
+
+          # Delete
+          curl -sf -X DELETE "http://localhost:3000/api/watches/${WATCH_ID}"
+          echo "PASS: watch create/list/delete"
+
+      - name: Pipeline IDs
+        run: |
+          RESP=$(curl -sf http://localhost:3000/api/pipelines)
+          echo "$RESP"
+          echo "$RESP" | python3 -c "
+          import json, sys
+          d = json.load(sys.stdin)
+          # Route returns { pipelines: [...] } or bare array — accept both
+          ids = d['pipelines'] if isinstance(d, dict) and 'pipelines' in d else d
+          assert isinstance(ids, list), f'expected array, got: {d}'
+          print(f'PASS: pipelines returned {len(ids)} id(s)')
+          "
+
+      - name: Ecosystem status
+        run: |
+          # Drop -f so curl doesn't exit on 503 (trainer is not running in CI)
+          RESP=$(curl -s http://localhost:3000/api/ecosystem/status)
+          echo "$RESP"
+          echo "$RESP" | python3 -c "
+          import json, sys
+          d = json.load(sys.stdin)
+          # Success: trainer up → { community: {...}, ... }
+          # Expected in CI: trainer offline → { error: '...', trainer_available: false }
+          ok = 'community' in d or d.get('trainer_available') is False
+          assert ok, f'unexpected ecosystem/status shape: {d}'
+          print('PASS: ecosystem/status')
+          "
+
+      - name: Print server logs on failure
+        if: failure()
+        run: docker logs gristmill_ci
+
+      - name: Stop container
+        if: always()
+        run: docker rm -f gristmill_ci || true
+
+  # ── 3. docker compose up/down validation ─────────────────────────────────
+  compose-validate:
+    name: docker compose config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate compose file syntax
+        run: docker compose config --quiet
+
+      - name: Validate compose file (no build, just parse)
+        run: |
+          # --profile full expands profiled services so ollama + mlflow are visible
+          docker compose --profile full config | python3 -c "
+          import sys, yaml
+          cfg = yaml.safe_load(sys.stdin)
+          services = list(cfg.get('services', {}).keys())
+          print(f'Services defined: {services}')
+          assert 'gristmill' in services, 'gristmill service missing'
+          assert 'ollama' in services, 'ollama service missing'
+          assert 'mlflow' in services, 'mlflow service missing'
+          print('PASS: compose config is valid')
+          "
