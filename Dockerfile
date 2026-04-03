@@ -1,7 +1,9 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 1: Build Rust daemon
 # ─────────────────────────────────────────────────────────────────────────────
-FROM rust:latest AS rust-builder
+# Pin to Bookworm so glibc matches node:20-slim (also Bookworm / glibc 2.36).
+# rust:latest recently moved to Trixie which breaks libstdc++/libmvec compat.
+FROM rust:1-bookworm AS rust-builder
 
 # Install C/C++ build tools needed by crates with native dependencies (usearch, etc.)
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -17,7 +19,7 @@ RUN cd gristmill-core && \
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 2: Build TypeScript shell
 # ─────────────────────────────────────────────────────────────────────────────
-FROM node:20-slim AS ts-builder
+FROM node:20-bookworm-slim AS ts-builder
 
 RUN npm install -g pnpm@9
 
@@ -34,7 +36,7 @@ RUN pnpm build
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 3: Final runtime image
 # ─────────────────────────────────────────────────────────────────────────────
-FROM node:20-slim AS runtime
+FROM node:20-bookworm-slim AS runtime
 
 ARG BUILD_DATE
 ARG GIT_SHA
@@ -61,6 +63,15 @@ WORKDIR /app
 COPY --from=rust-builder \
     /build/gristmill-core/target/release/gristmill-daemon \
     /usr/local/bin/gristmill-daemon
+
+# Copy C++ runtime libs from the builder so CXXABI version and libmvec match.
+# node:20-slim strips libstdc++ and libmvec; the builder (rust:latest) has the
+# full set. We resolve the arch at build time so this works on amd64 and arm64.
+RUN --mount=type=bind,from=rust-builder,source=/,target=/builder \
+    sh -c 'ARCH=$(uname -m)-linux-gnu; \
+           cp /builder/usr/lib/$ARCH/libstdc++.so.6* /usr/lib/$ARCH/ 2>/dev/null || true; \
+           cp /builder/usr/lib/$ARCH/libmvec*        /usr/lib/$ARCH/ 2>/dev/null || true; \
+           ldconfig'
 
 # Copy TypeScript shell build + production dependencies
 COPY --from=ts-builder /build/dist ./dist
