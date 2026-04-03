@@ -74,6 +74,9 @@ class FeedbackRecord:
         "token_count",
         # Derived fields for training
         "label",
+        # Attached by synthetic generator and augmentor
+        "_text",
+        "_priority",
     )
 
     def __init__(self, raw: dict[str, Any]) -> None:
