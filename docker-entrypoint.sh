@@ -1,19 +1,51 @@
 #!/bin/sh
 set -e
 
+CONFIG="${GRISTMILL_CONFIG:-/data/gristmill/config.yaml}"
+SOCK="${GRISTMILL_SOCK:-/data/gristmill/gristmill.sock}"
+
+# ── Validate config ───────────────────────────────────────────────────────────
+if [ ! -f "$CONFIG" ]; then
+  echo "[entrypoint] ERROR: config file not found at $CONFIG"
+  echo "[entrypoint]   Mount it with:"
+  echo "[entrypoint]     - type: bind"
+  echo "[entrypoint]       source: ./gristmill-data/config.yaml"
+  echo "[entrypoint]       target: $CONFIG"
+  echo "[entrypoint]       read_only: true"
+  exit 1
+fi
+
+if grep -q "REPLACE_ME" "$CONFIG" 2>/dev/null; then
+  echo "[entrypoint] WARNING: config.yaml still contains REPLACE_ME placeholders."
+  echo "[entrypoint]   Edit gristmill-data/config.yaml and fill in your API keys."
+fi
+
+# ── Ensure runtime directories exist ─────────────────────────────────────────
+mkdir -p \
+  /data/gristmill/models \
+  /data/gristmill/memory \
+  /data/gristmill/memory/cold \
+  /data/gristmill/feedback \
+  /data/gristmill/plugins \
+  /data/gristmill/checkpoints \
+  /data/gristmill/logs
+
+echo "[entrypoint] Config:  $CONFIG"
+echo "[entrypoint] Socket:  $SOCK"
 echo "[entrypoint] Starting GristMill daemon..."
+
 gristmill-daemon &
 DAEMON_PID=$!
 
-# Wait for socket to appear (up to 15s)
+# ── Wait for socket (up to 15s) ───────────────────────────────────────────────
 i=0
-while [ ! -S "$GRISTMILL_SOCK" ] && [ $i -lt 30 ]; do
+while [ ! -S "$SOCK" ] && [ $i -lt 30 ]; do
   sleep 0.5
   i=$((i + 1))
 done
 
-if [ ! -S "$GRISTMILL_SOCK" ]; then
-  echo "[entrypoint] ERROR: daemon socket did not appear at $GRISTMILL_SOCK"
+if [ ! -S "$SOCK" ]; then
+  echo "[entrypoint] ERROR: daemon socket did not appear at $SOCK"
   kill "$DAEMON_PID" 2>/dev/null
   exit 1
 fi

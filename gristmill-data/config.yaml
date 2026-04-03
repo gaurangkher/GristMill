@@ -1,0 +1,102 @@
+# GristMill v2 — Configuration
+#
+# This file is bind-mounted into the container at /data/gristmill/config.yaml.
+# Put all secrets here — no environment variables needed.
+#
+# Paths use /data/gristmill/ which is where the container maps your
+# gristmill-data/ directory. Do not change the /data/gristmill/ prefix.
+
+# ── Core ─────────────────────────────────────────────────────────────────────
+core:
+  workspace: /data/gristmill
+  log_level: info                    # trace | debug | info | warn | error
+  mode: daemon
+
+# ── Sieve (triage classifier) ────────────────────────────────────────────────
+sieve:
+  confidence_threshold: 0.85         # escalate to LLM below this
+  feedback_dir: /data/gristmill/feedback/
+  cache_size: 10000
+
+# ── Grinders (local model pool) ──────────────────────────────────────────────
+grinders:
+  workers: auto                      # auto = CPU cores - 1
+  models:
+    - id: intent-classifier-v1
+      runtime: onnx
+      path: /data/gristmill/models/intent-classifier-v1.onnx
+      warm: true
+    - id: embedder
+      runtime: onnx
+      path: /data/gristmill/models/minilm-l6-v2.onnx
+      warm: true
+
+# ── Hammer (LLM gateway) ─────────────────────────────────────────────────────
+hammer:
+  providers:
+    anthropic:
+      # Paste your key directly — no env var needed
+      api_key: "sk-ant-REPLACE_ME"
+      default_model: claude-sonnet-4
+    ollama:
+      # "ollama" resolves to the Ollama container when using --profile ollama
+      base_url: http://ollama:11434
+      model: llama3.1:8b
+  budget:
+    daily_tokens: 500000
+    monthly_tokens: 10000000
+  cache:
+    enabled: true
+    similarity_threshold: 0.92
+
+# ── Millwright (DAG orchestrator) ────────────────────────────────────────────
+millwright:
+  max_concurrency: 8
+  default_timeout_ms: 30000
+  checkpoint_dir: /data/gristmill/checkpoints/
+
+# ── Ledger (three-tier memory) ───────────────────────────────────────────────
+ledger:
+  hot:
+    max_size_mb: 512
+  warm:
+    db_path: /data/gristmill/memory/warm.db
+    vector_index_path: /data/gristmill/memory/vectors.usearch
+    fts_enabled: true
+  cold:
+    archive_dir: /data/gristmill/memory/cold/
+    compression: zstd
+  compaction:
+    interval_hours: 6
+    similarity_threshold: 0.90
+
+# ── Bell Tower (notifications) ───────────────────────────────────────────────
+bell_tower:
+  channels:
+    slack:
+      # Paste your webhook URL directly
+      webhook_url: "https://hooks.slack.com/services/REPLACE_ME"
+    email:
+      smtp_host: smtp.gmail.com
+      smtp_port: 587
+      username: "REPLACE_ME@gmail.com"
+      password: "REPLACE_ME"
+  quiet_hours:
+    start: "22:00"
+    end: "07:00"
+    override_for: [critical]
+  digest:
+    enabled: true
+    interval_minutes: 60
+
+# ── Integrations (TypeScript shell) ──────────────────────────────────────────
+integrations:
+  dashboard:
+    port: 3000
+  plugins_dir: /data/gristmill/plugins/
+  hoppers:
+    webhook:
+      port: 3001
+      channels:
+        web-capture:
+          secret: ""               # leave empty to skip HMAC verification locally

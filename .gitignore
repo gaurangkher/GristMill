@@ -54,3 +54,21 @@ Thumbs.db
 # GristMill runtime
 *.sock
 gristmill-core/crates/grist-millwright/checkpoints/
+
+# gristmill-data — track structure, ignore runtime contents
+gristmill-data/models/*
+!gristmill-data/models/.gitkeep
+gristmill-data/memory/*
+!gristmill-data/memory/.gitkeep
+gristmill-data/feedback/*
+!gristmill-data/feedback/.gitkeep
+gristmill-data/checkpoints/*
+!gristmill-data/checkpoints/.gitkeep
+gristmill-data/logs/*
+!gristmill-data/logs/.gitkeep
+gristmill-data/ollama-models/*
+!gristmill-data/ollama-models/.gitkeep
+gristmill-data/mlflow/*
+!gristmill-data/mlflow/.gitkeep
+# plugins ARE committed — they are source code
+# config.yaml is committed as a template — replace REPLACE_ME before use
