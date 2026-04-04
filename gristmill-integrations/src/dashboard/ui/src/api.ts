@@ -64,17 +64,21 @@ export interface CycleSummary {
   error: string | null;
 }
 
+// Matches GET /api/metrics/budget
 export interface MetricsBudget {
-  budget_remaining: number;
-  tokens_used: number;
-  requests_today: number;
+  daily_used: number;
+  daily_limit: number;
+  window_start_ms: number;
+  pct_used: number;
+  cached_at: string | null;
+  status?: string;
 }
 
+// Matches GET /api/metrics/health
 export interface MetricsHealth {
-  sieve_ok: boolean;
-  grinders_ok: boolean;
-  hammer_ok: boolean;
-  ledger_ok: boolean;
+  status: string;
+  uptime: number;
+  timestamp: string;
 }
 
 export interface PipelineRun {

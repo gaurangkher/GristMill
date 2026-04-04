@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, type MetricsBudget, type MetricsHealth, type TrainerStatus } from "../api.js";
+import { api, type MetricsBudget, type MetricsHealth, type TrainerStatus, type RoutingMetrics } from "../api.js";
 
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -44,23 +44,26 @@ function trainerStateBadge(state: string) {
 export default function OverviewPage() {
   const [health, setHealth] = useState<MetricsHealth | null>(null);
   const [budget, setBudget] = useState<MetricsBudget | null>(null);
+  const [routing, setRouting] = useState<RoutingMetrics | null>(null);
   const [trainer, setTrainer] = useState<TrainerStatus | null>(null);
   const [trainerChecked, setTrainerChecked] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Health and budget are essential — surface errors for those.
-    // Trainer is optional (may not be running); a 503 should not hide the whole page.
+    // Core metrics — surface errors if these fail
     Promise.all([
       api.metricsHealth().then(setHealth),
       api.metricsBudget().then(setBudget),
+      api.metricsRouting().then(setRouting),
     ]).catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
 
+    // Trainer is optional — 503 must not block the rest of the page
     api.trainerStatus().then(setTrainer).catch(() => {}).finally(() => setTrainerChecked(true));
 
     const interval = setInterval(() => {
       api.metricsHealth().then(setHealth).catch(() => {});
       api.metricsBudget().then(setBudget).catch(() => {});
+      api.metricsRouting().then(setRouting).catch(() => {});
       api.trainerStatus().then(setTrainer).catch(() => {});
     }, 15_000);
     return () => clearInterval(interval);
@@ -68,15 +71,22 @@ export default function OverviewPage() {
 
   if (error) return <p style={{ color: "var(--red)" }}>Failed to load: {error}</p>;
 
+  const budgetPct = budget ? Math.min(100, budget.pct_used) : 0;
+  const budgetBarColor = budgetPct >= 90 ? "var(--red, #ef4444)" : budgetPct >= 70 ? "#f59e0b" : "var(--accent)";
+
   return (
     <div style={{ display: "grid", gap: 20, gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))" }}>
-      <Card title="Subsystem Health">
+      <Card title="System Health">
         {health ? (
           <>
-            <StatRow label="Sieve (triage)" value="" badge={statusBadge(health.sieve_ok)} />
-            <StatRow label="Grinders (inference)" value="" badge={statusBadge(health.grinders_ok)} />
-            <StatRow label="Hammer (LLM)" value="" badge={statusBadge(health.hammer_ok)} />
-            <StatRow label="Ledger (memory)" value="" badge={statusBadge(health.ledger_ok)} />
+            <StatRow label="Status" value={health.status.toUpperCase()} badge={statusBadge(health.status === "ok")} />
+            <StatRow label="Uptime" value={`${Math.floor(health.uptime / 60)}m ${Math.floor(health.uptime % 60)}s`} />
+            {routing && !routing._stub && (
+              <>
+                <StatRow label="Cache hit rate" value={`${(routing.sieve.routing_cache.hit_rate * 100).toFixed(1)}%`} />
+                <StatRow label="Pipelines" value={routing.pipelines_registered.toLocaleString()} />
+              </>
+            )}
           </>
         ) : <span style={{ color: "var(--text-muted)" }}>Loading…</span>}
       </Card>
@@ -84,9 +94,17 @@ export default function OverviewPage() {
       <Card title="LLM Budget">
         {budget ? (
           <>
-            <StatRow label="Tokens used" value={budget.tokens_used.toLocaleString()} />
-            <StatRow label="Budget remaining" value={`$${budget.budget_remaining.toFixed(4)}`} />
-            <StatRow label="Requests today" value={budget.requests_today.toLocaleString()} />
+            <StatRow label="Daily used" value={`${budget.daily_used.toLocaleString()} tokens`} />
+            <StatRow label="Daily limit" value={budget.daily_limit > 0 ? budget.daily_limit.toLocaleString() : "—"} />
+            <StatRow label="Used" value={`${budget.pct_used.toFixed(1)}%`} />
+            <div style={{ marginTop: 8 }}>
+              <div style={{ background: "var(--border)", borderRadius: 4, height: 6, overflow: "hidden" }}>
+                <div style={{ width: `${budgetPct}%`, height: "100%", background: budgetBarColor, transition: "width 0.3s ease" }} />
+              </div>
+            </div>
+            {budget.status === "no_data" && (
+              <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 6 }}>No LLM calls yet</p>
+            )}
           </>
         ) : <span style={{ color: "var(--text-muted)" }}>Loading…</span>}
       </Card>
