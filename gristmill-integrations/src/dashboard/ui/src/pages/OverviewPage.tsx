@@ -45,18 +45,24 @@ export default function OverviewPage() {
   const [health, setHealth] = useState<MetricsHealth | null>(null);
   const [budget, setBudget] = useState<MetricsBudget | null>(null);
   const [trainer, setTrainer] = useState<TrainerStatus | null>(null);
+  const [trainerChecked, setTrainerChecked] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    // Health and budget are essential — surface errors for those.
+    // Trainer is optional (may not be running); a 503 should not hide the whole page.
     Promise.all([
       api.metricsHealth().then(setHealth),
       api.metricsBudget().then(setBudget),
-      api.trainerStatus().then(setTrainer),
     ]).catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
 
+    api.trainerStatus().then(setTrainer).catch(() => {}).finally(() => setTrainerChecked(true));
+
     const interval = setInterval(() => {
+      api.metricsHealth().then(setHealth).catch(() => {});
+      api.metricsBudget().then(setBudget).catch(() => {});
       api.trainerStatus().then(setTrainer).catch(() => {});
-    }, 10_000);
+    }, 15_000);
     return () => clearInterval(interval);
   }, []);
 
@@ -93,7 +99,13 @@ export default function OverviewPage() {
             <StatRow label="Pending records" value={trainer.buffer_pending_count.toLocaleString()} />
             <StatRow label="Teacher cost" value={`$${trainer.teacher_cost_usd_total.toFixed(4)}`} />
           </>
-        ) : <span style={{ color: "var(--text-muted)" }}>Loading…</span>}
+        ) : trainerChecked ? (
+          <span style={{ color: "var(--text-muted)", fontSize: 13 }}>
+            Trainer offline — start <code>gristmill-trainer</code> to enable
+          </span>
+        ) : (
+          <span style={{ color: "var(--text-muted)" }}>Loading…</span>
+        )}
       </Card>
 
       {trainer && Object.keys(trainer.domains).length > 0 && (
