@@ -31,7 +31,16 @@ COPY gristmill-integrations/package.json \
 RUN pnpm install --frozen-lockfile
 
 COPY gristmill-integrations/src/ ./src/
+
+# Build the React SPA (outputs to src/dashboard/ui/dist/)
+RUN cd src/dashboard/ui && npm install && npm run build
+
+# Compile the TypeScript server (outputs to dist/)
 RUN pnpm build
+
+# Place the React dist where the compiled server expects it:
+#   _resolveUiDist() resolves to dist/dashboard/ui/dist/ relative to dist/
+RUN mkdir -p dist/dashboard/ui && cp -r src/dashboard/ui/dist dist/dashboard/ui/
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 3: Final runtime image
