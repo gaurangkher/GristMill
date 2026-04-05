@@ -103,9 +103,6 @@ services:
       mlflow:
         condition: service_healthy
         required: false
-      trainer:
-        condition: service_healthy
-        required: false
     networks:
       - gristmill_net
 
