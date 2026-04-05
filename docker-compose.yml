@@ -203,17 +203,17 @@ services:
       - mlflow
       - server
       - --host=0.0.0.0
-      - --port=5000
+      - --port=5050
       - --backend-store-uri=sqlite:////data/mlflow/mlruns.db
       - --default-artifact-root=/data/mlflow/artifacts
     ports:
-      - "${MLFLOW_PORT:-5000}:5000"
+      - "${MLFLOW_PORT:-5050}:5050"   # 5000 conflicts with macOS AirPlay Receiver
     volumes:
       - type: bind
         source: ./gristmill-data/mlflow
         target: /data/mlflow
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:5000/health"]
+      test: ["CMD", "curl", "-sf", "http://localhost:5050/health"]
       interval: 20s
       timeout: 5s
       start_period: 15s

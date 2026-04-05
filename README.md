@@ -261,7 +261,7 @@ Dashboard: **http://localhost:3000**
 | *(default)* | `gristmill` daemon + TS shell | 3000 |
 | `trainer` | Python trainer daemon | 7432 |
 | `ollama` | Ollama local LLM | 11434 |
-| `mlflow` | MLflow experiment tracking UI | 5000 |
+| `mlflow` | MLflow experiment tracking UI | 5050 |
 | `full` | All of the above | — |
 
 ### 4. First trainer start
@@ -390,7 +390,7 @@ Once installed, `import gristmill_core` works from Python and `HAS_NATIVE = True
 | 3001 | HTTP hopper | Inbound event endpoint |
 | 7432 | Trainer API | localhost / trainer container only |
 | 11434 | Ollama | When `--profile ollama` |
-| 5000 | MLflow | When `--profile mlflow` |
+| 5050 | MLflow | When `--profile mlflow` (avoids macOS AirPlay on 5000) |
 
 ---
 
