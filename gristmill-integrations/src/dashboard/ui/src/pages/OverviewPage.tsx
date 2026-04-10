@@ -119,7 +119,7 @@ export default function OverviewPage() {
           </>
         ) : trainerChecked ? (
           <span style={{ color: "var(--text-muted)", fontSize: 13 }}>
-            Trainer offline — start <code>gristmill-trainer</code> to enable
+            Trainer offline — run <code>docker compose --profile trainer up -d</code> or <code>gristmill-trainer</code> locally
           </span>
         ) : (
           <span style={{ color: "var(--text-muted)" }}>Loading…</span>

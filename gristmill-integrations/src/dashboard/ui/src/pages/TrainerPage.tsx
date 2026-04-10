@@ -65,7 +65,11 @@ export default function TrainerPage() {
           <p style={{ marginTop: 12, color: msg.startsWith("Error") ? "var(--red)" : "var(--green)", fontSize: 13 }}>{msg}</p>
         )}
         {!trainerAvailable && (
-          <p style={{ marginTop: 12, color: "var(--text-muted)", fontSize: 13 }}>Trainer service offline (localhost:7432)</p>
+          <p style={{ marginTop: 12, color: "var(--text-muted)", fontSize: 13 }}>
+            Trainer service offline — run{" "}
+            <code>docker compose --profile trainer up -d</code>{" "}
+            or <code>gristmill-trainer</code> locally to enable.
+          </p>
         )}
       </div>
 
