@@ -15,7 +15,7 @@
 
 import type { FastifyInstance, FastifyPluginOptions } from "fastify";
 
-const TRAINER_BASE = "http://127.0.0.1:7432";
+const TRAINER_BASE = process.env["TRAINER_URL"] ?? "http://127.0.0.1:7432";
 const TIMEOUT_MS = 10_000;
 // Export/import operations may take longer (file I/O + potential download)
 const LONG_TIMEOUT_MS = 120_000;

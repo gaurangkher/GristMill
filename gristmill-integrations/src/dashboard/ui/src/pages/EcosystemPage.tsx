@@ -25,14 +25,14 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
 
 export default function EcosystemPage() {
   const [status, setStatus] = useState<EcosystemStatus | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [trainerOffline, setTrainerOffline] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<Record<string, string>>({});
 
   const load = useCallback(() => {
     api.ecosystemStatus()
-      .then(setStatus)
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
+      .then((s) => { setStatus(s); setTrainerOffline(false); })
+      .catch(() => setTrainerOffline(true));
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -61,7 +61,13 @@ export default function EcosystemPage() {
     }
   };
 
-  if (error) return <p style={{ color: "var(--red)" }}>Failed to load ecosystem status: {error}</p>;
+  if (trainerOffline) return (
+    <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius)", padding: 24, color: "var(--text-muted)" }}>
+      <strong style={{ display: "block", marginBottom: 8 }}>Trainer offline</strong>
+      Ecosystem features require the trainer daemon. Start it with:{" "}
+      <code>docker compose --profile trainer up -d</code> or <code>gristmill-trainer</code> locally.
+    </div>
+  );
   if (!status) return <p style={{ color: "var(--text-muted)" }}>Loading…</p>;
 
   const { community, federated } = status;
