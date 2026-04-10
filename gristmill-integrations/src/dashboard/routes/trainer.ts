@@ -16,7 +16,7 @@
 
 import type { FastifyInstance, FastifyPluginOptions } from "fastify";
 
-const TRAINER_BASE = "http://127.0.0.1:7432";
+const TRAINER_BASE = process.env["TRAINER_URL"] ?? "http://127.0.0.1:7432";
 const TIMEOUT_MS = 5_000;
 
 export async function trainerRoutes(

@@ -5,19 +5,26 @@
 #
 # Profiles
 #   (default)          gristmill only
+#   --profile trainer  + Python trainer daemon (auto-retrains Sieve on feedback)
 #   --profile ollama   + Ollama local LLM
 #   --profile mlflow   + MLflow experiment tracking
-#   --profile full     + Ollama + MLflow
+#   --profile full     + trainer + Ollama + MLflow
 #
 # Quick start:
-#   docker compose up -d                       # core only
-#   docker compose --profile ollama up -d      # + local LLM
-#   docker compose --profile full up -d        # everything
+#   docker compose up -d                        # core only
+#   docker compose --profile trainer up -d      # + trainer
+#   docker compose --profile ollama up -d       # + local LLM
+#   docker compose --profile full up -d         # everything
 #
 # First run:
 #   The gristmill-data/ directory is already set up with a config template.
 #   Edit gristmill-data/config.yaml and replace the REPLACE_ME placeholders
 #   with your actual API keys before starting.
+#
+# Trainer notes:
+#   First start downloads HuggingFace model weights (~400 MB). Subsequent starts
+#   are fast because weights are cached in gristmill-data/models/.
+#   ANTHROPIC_API_KEY must be set for teacher-model calls during training cycles.
 
 services:
 
@@ -70,10 +77,15 @@ services:
       - type: bind
         source: ./gristmill-data/logs
         target: /data/gristmill/logs
+
+      # ── Trainer IPC socket (shared with trainer container when profile active) ─
+      - gristmill_run:/gristmill/run
     environment:
       NODE_ENV: production
       GRISTMILL_CONFIG: /data/gristmill/config.yaml
       GRISTMILL_SOCK: /data/gristmill/gristmill.sock
+      # When running --profile trainer, proxy requests to the trainer container
+      TRAINER_URL: "http://trainer:7432"
     healthcheck:
       test:
         - CMD
@@ -91,6 +103,71 @@ services:
       mlflow:
         condition: service_healthy
         required: false
+    networks:
+      - gristmill_net
+
+  # ── GristMill Trainer (profile: trainer / full) ──────────────────────────
+  trainer:
+    image: python:3.11-slim
+    container_name: gristmill_trainer
+    profiles: [trainer, full]
+    restart: unless-stopped
+    working_dir: /app
+    # Bootstrap is idempotent — skips download if models already exist
+    command: >
+      sh -c "pip install -e gristmill-ml -q &&
+             python gristmill-ml/scripts/bootstrap_models.py --no-quantize &&
+             gristmill-trainer"
+    ports:
+      - "${TRAINER_PORT:-7432}:7432"
+    volumes:
+      # ── Source (editable install) ──────────────────────────────────────────
+      - type: bind
+        source: ./gristmill-ml
+        target: /app/gristmill-ml
+        read_only: true
+
+      # ── Config (read-only) ─────────────────────────────────────────────────
+      - type: bind
+        source: ./gristmill-data/config.yaml
+        target: /data/gristmill/config.yaml
+        read_only: true
+
+      # ── Models (trainer writes new ONNX here; Rust daemon hot-reloads) ─────
+      - type: bind
+        source: ./gristmill-data/models
+        target: /data/gristmill/models
+
+      # ── Feedback logs (trainer reads these to build training datasets) ──────
+      - type: bind
+        source: ./gristmill-data/feedback
+        target: /data/gristmill/feedback
+        read_only: true
+
+      # ── Trainer IPC socket (Rust daemon connects here for hot-reload events) ─
+      - gristmill_run:/gristmill/run
+
+      # ── pip cache (speeds up container restarts) ───────────────────────────
+      - trainer_pip_cache:/root/.cache/pip
+    environment:
+      GRISTMILL_CONFIG: /data/gristmill/config.yaml
+      GRISTMILL_DATA_DIR: /data/gristmill
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      # Bind to all interfaces so the gristmill container can reach us via Docker bridge
+      TRAINER_API_HOST: "0.0.0.0"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:7432/health', timeout=3)"
+      interval: 30s
+      timeout: 10s
+      start_period: 120s   # allow time for model bootstrap on first run
+      retries: 3
+    depends_on:
+      gristmill:
+        condition: service_healthy
     networks:
       - gristmill_net
 
@@ -128,17 +205,17 @@ services:
       - mlflow
       - server
       - --host=0.0.0.0
-      - --port=5000
+      - --port=5050
       - --backend-store-uri=sqlite:////data/mlflow/mlruns.db
       - --default-artifact-root=/data/mlflow/artifacts
     ports:
-      - "${MLFLOW_PORT:-5000}:5000"
+      - "${MLFLOW_PORT:-5050}:5050"   # 5000 conflicts with macOS AirPlay Receiver
     volumes:
       - type: bind
         source: ./gristmill-data/mlflow
         target: /data/mlflow
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:5000/health"]
+      test: ["CMD", "curl", "-sf", "http://localhost:5050/health"]
       interval: 20s
       timeout: 5s
       start_period: 15s
@@ -150,3 +227,10 @@ services:
 networks:
   gristmill_net:
     driver: bridge
+
+# ── Named volumes ─────────────────────────────────────────────────────────────
+volumes:
+  # Shared Unix socket directory: trainer emits hot-reload events, Rust daemon reads them
+  gristmill_run:
+  # pip cache so trainer container restarts don't re-download packages
+  trainer_pip_cache:

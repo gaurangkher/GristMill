@@ -74,137 +74,251 @@ Optional (only needed for full native bridges):
 
 ---
 
-## Quickstart
+## Setup
 
-### 1. Smoke-test the Rust core (no extra dependencies)
+Choose your path:
 
-This is the fastest way to verify the system works. The daemon triages sample events through the Sieve and prints routing decisions.
+- **[Local (no Docker)](#local-setup)** — best for development; each component runs in a separate terminal
+- **[Docker](#docker-setup)** — best for production or demos; single `docker compose up` command
+
+---
+
+## Local Setup
+
+### 1. Config
+
+```bash
+mkdir -p ~/.gristmill/{models,memory/cold,feedback,checkpoints,plugins,logs,run}
+cp gristmill-data/config.yaml ~/.gristmill/config.yaml
+```
+
+Edit `~/.gristmill/config.yaml` — minimum required fields:
+
+```yaml
+hammer:
+  providers:
+    anthropic:
+      api_key: "sk-ant-..."          # your Anthropic API key
+      default_model: claude-sonnet-4-20250514
+    ollama:                           # optional — remove if not using Ollama
+      base_url: http://localhost:11434
+      model: llama3.1:8b
+  budget:
+    daily_tokens: 500000
+    monthly_tokens: 10000000
+
+integrations:
+  dashboard:
+    port: 4000
+  slack:                              # optional — remove if not using Slack
+    app_token: "xapp-..."
+    bot_token: "xoxb-..."
+    signing_secret: "..."
+```
+
+Set environment variables (add to `.zshrc` / `.bashrc`):
+
+```bash
+export GRISTMILL_CONFIG=~/.gristmill/config.yaml
+export GRISTMILL_SOCK=~/.gristmill/gristmill.sock
+```
+
+> **Security:** `gristmill-data/config.yaml` is tracked as a template. Never commit real API keys.
+> Use environment variable interpolation (`${ANTHROPIC_API_KEY}`) and set secrets in your shell.
+
+### 2. Build and start the Rust daemon
+
+**Terminal 1:**
 
 ```bash
 cd gristmill-core
-cargo run -p gristmill-daemon
+cargo build --release
+./target/release/gristmill-daemon
 ```
 
-Expected output:
+The daemon writes a Unix socket at `$GRISTMILL_SOCK` and stays in the foreground. Wait for the log line `daemon ready` before starting the next step.
 
-```
-INFO gristmill_daemon: GristMill daemon starting (Phase 1)
-INFO gristmill_daemon: Sieve initialised threshold=0.85
-INFO gristmill_daemon: triaged sample="cli command"      route=Rules      confidence=0.97
-INFO gristmill_daemon: triaged sample="calendar request" route=Hybrid     confidence=0.81
-INFO gristmill_daemon: triaged sample="complex question" route=LlmNeeded  confidence=0.73
-INFO gristmill_daemon: triaged sample="code review"      route=LocalML    confidence=0.91
-```
+### 3. Start the TypeScript shell
 
-### 2. Run the TypeScript shell in mock mode
-
-The `GRISTMILL_MOCK_BRIDGE=1` flag replaces the native Rust `.node` binary with an in-memory mock so the TypeScript shell starts without building the FFI bridge first.
+**Terminal 2:**
 
 ```bash
 cd gristmill-integrations
-
-# Install dependencies
 pnpm install
-
-# Type-check
-pnpm lint
-
-# Start in mock mode
-GRISTMILL_MOCK_BRIDGE=1 pnpm dev
+pnpm build
+node dist/main.js
 ```
 
-This starts the **Dashboard + API** on `http://localhost:3000`:
+For development with hot-reload:
 
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/events` | POST | Submit an event, get a routing decision |
-| `/api/triage` | POST | Triage text directly |
-| `/api/memory/remember` | POST | Store a memory |
-| `/api/memory/recall` | POST | Search memories |
-| `/api/metrics/health` | GET | Liveness check |
-| `/api/metrics/budget` | GET | LLM token usage |
-| `/api/pipelines` | GET/POST | List/register pipelines |
-| `/api/watches` | GET/POST | Notification watch management |
-| `/api/plugins` | GET | Loaded plugins |
+```bash
+pnpm dev
+```
 
-Test the HTTP endpoint:
+Dashboard is available at **http://localhost:4000**.
+
+Verify:
+
+```bash
+curl http://localhost:4000/api/metrics/health
+# {"status":"ok","uptime":12.3,"timestamp":"..."}
+```
+
+### 4. Start the Python trainer (optional)
+
+The trainer auto-retrains the Sieve classifier when 500+ feedback records accumulate or 7 days pass. The system runs without it — you just won't get automatic model improvement.
+
+**Terminal 3:**
+
+```bash
+# Install (pulls torch, transformers, sentence-transformers, onnx, fastapi, ~2-3 GB)
+pip install -e gristmill-ml
+
+# Bootstrap base models — one-time download (~400 MB), idempotent
+python gristmill-ml/scripts/bootstrap_models.py
+
+# Start trainer daemon
+gristmill-trainer
+```
+
+Trainer control API: **http://localhost:7432**
+
+```bash
+curl http://localhost:7432/health
+# {"ok":true,"uptime_seconds":5.1,...}
+
+curl http://localhost:7432/status
+# {"state":"IDLE","current_version":1,"buffer_pending_count":0,...}
+```
+
+The dashboard **Overview** and **Trainer** pages show live state once it's running.
+
+**Bootstrap flags:**
+
+| Flag | Effect |
+|------|--------|
+| `--no-quantize` | Skip INT8 quantization (faster, slightly larger models) |
+| `--embedder-only` | Only export the sentence embedder |
+| `--classifier-epochs N` | Training epochs (default: 3) |
+| `--output-dir PATH` | Override `~/.gristmill/models/` |
+
+### 5. Smoke-test event routing
 
 ```bash
 # Submit an event
-curl -s -X POST http://localhost:3000/events \
+curl -s -X POST http://localhost:4000/events \
   -H "Content-Type: application/json" \
   -d '{"channel":"http","payload":{"text":"Schedule a meeting with Alice tomorrow"}}' \
   | jq .
 
-# Store and recall memories
-curl -s -X POST http://localhost:3000/api/memory/remember \
+# Store a memory
+curl -s -X POST http://localhost:4000/api/memory/remember \
   -H "Content-Type: application/json" \
   -d '{"content":"prod-db-01 disk alert resolved by pruning WAL logs","tags":["infra","postgres"]}'
 
-curl -s -X POST http://localhost:3000/api/memory/recall \
+# Recall memories
+curl -s -X POST http://localhost:4000/api/memory/recall \
   -H "Content-Type: application/json" \
   -d '{"query":"disk postgres","limit":5}'
 ```
 
-### 3. Install the Python ML package
+---
+
+## Docker Setup
+
+### 1. Config
+
+Edit the template before first start:
 
 ```bash
-cd gristmill-ml
-
-# Editable install (pulls torch, transformers, sentence-transformers, onnxruntime, mlflow, …)
-# Note: first install downloads ~2–3 GB of ML dependencies
-pip install -e ".[dev]"
+nano gristmill-data/config.yaml
 ```
 
-Train the Sieve classifier from feedback logs (falls back to synthetic data on first run):
+Replace all `REPLACE_ME` placeholders with real values. The entrypoint will warn you at startup if any remain.
+
+### 2. Start
 
 ```bash
-gristmill-train-sieve
+# Core only (daemon + dashboard)
+docker compose up -d
+
+# + Python trainer (auto-retraining loop)
+ANTHROPIC_API_KEY=sk-ant-... docker compose --profile trainer up -d
+
+# + Ollama local LLM
+docker compose --profile ollama up -d
+
+# Everything
+ANTHROPIC_API_KEY=sk-ant-... docker compose --profile full up -d
 ```
 
-Export a trained model to ONNX:
+Dashboard: **http://localhost:3000**
+
+### 3. Profiles
+
+| Profile | Adds | Port |
+|---------|------|------|
+| *(default)* | `gristmill` daemon + TS shell | 3000 |
+| `trainer` | Python trainer daemon | 7432 |
+| `ollama` | Ollama local LLM | 11434 |
+| `mlflow` | MLflow experiment tracking UI | 5050 |
+| `full` | All of the above | — |
+
+### 4. First trainer start
+
+On first boot the trainer container downloads ~400 MB of HuggingFace model weights into `gristmill-data/models/`. The healthcheck has a 120-second start period to allow for this. Subsequent starts skip the download.
+
+### 5. Useful commands
 
 ```bash
-gristmill-export
-```
+# Follow logs
+docker compose logs -f gristmill
+docker compose logs -f trainer
 
-Validate ONNX export parity against PyTorch:
+# Rebuild after code changes
+docker compose build gristmill && docker compose up -d gristmill
 
-```bash
-gristmill-validate
+# Stop everything (data preserved)
+docker compose down
+
+# Stop and wipe runtime data (models, memory, feedback)
+docker compose down -v
 ```
 
 ---
 
-## Configuration
+## Configuration Reference
 
-GristMill reads its configuration from `~/.gristmill/config.yaml`. Create the directory and a minimal config to get started:
-
-```bash
-mkdir -p ~/.gristmill/feedback ~/.gristmill/models ~/.gristmill/memory
-```
+`config.yaml` key sections:
 
 ```yaml
-# ~/.gristmill/config.yaml
-
-core:
-  workspace: ~/.gristmill
-  log_level: info
-
 sieve:
-  confidence_threshold: 0.85
-  feedback_dir: ~/.gristmill/feedback/
+  confidence_threshold: 0.85   # escalate to LLM when confidence < this
+  cache_size: 10000
 
 hammer:
   providers:
     anthropic:
       api_key: ${ANTHROPIC_API_KEY}
-      default_model: claude-sonnet-4-6
+      default_model: claude-sonnet-4-20250514
     ollama:
       base_url: http://localhost:11434
       model: llama3.1:8b
   budget:
     daily_tokens: 500000
+    monthly_tokens: 10000000
+  cache:
+    similarity_threshold: 0.92  # reuse cached response when similarity ≥ this
+
+ledger:
+  hot:
+    max_size_mb: 512
+  warm:
+    db_path: ~/.gristmill/memory/warm.db
+    vector_index_path: ~/.gristmill/memory/vectors.usearch
+  cold:
+    archive_dir: ~/.gristmill/memory/cold/
+    compression: zstd
 
 bell_tower:
   channels:
@@ -218,10 +332,14 @@ bell_tower:
   quiet_hours:
     start: "22:00"
     end: "07:00"
+    override_for: [critical]
 
 integrations:
   dashboard:
-    port: 4000
+    port: 4000           # 3000 in Docker
+  hoppers:
+    http:
+      port: 3001
   plugins_dir: ~/.gristmill/plugins/
 ```
 
@@ -260,6 +378,19 @@ pip install target/wheels/gristmill_core-*.whl
 ```
 
 Once installed, `import gristmill_core` works from Python and `HAS_NATIVE = True` in `gristmill_ml/core.py`.
+
+---
+
+## Ports
+
+| Port | Service | Notes |
+|------|---------|-------|
+| 3000 | Dashboard (Docker) | Fastify API + React SPA |
+| 4000 | Dashboard (local) | Same — configured in `integrations.dashboard.port` |
+| 3001 | HTTP hopper | Inbound event endpoint |
+| 7432 | Trainer API | localhost / trainer container only |
+| 11434 | Ollama | When `--profile ollama` |
+| 5050 | MLflow | When `--profile mlflow` (avoids macOS AirPlay on 5000) |
 
 ---
 
@@ -348,6 +479,8 @@ See [`gristmill-v2-architecture.md`](./gristmill-v2-architecture.md) for the ful
 | `ANTHROPIC_API_KEY` | `grist-hammer` | Anthropic API key for Claude escalation |
 | `SLACK_WEBHOOK_URL` | Bell Tower | Slack Incoming Webhook URL |
 | `EMAIL_USER` / `EMAIL_PASS` | Bell Tower | SMTP credentials for email notifications |
-| `GRISTMILL_CONFIG` | All | Override config file path (default: `~/.gristmill/config.yaml`) |
-| `GRISTMILL_MOCK_BRIDGE` | TypeScript | Set to `1` to use in-memory mock instead of native `.node` bridge |
+| `GRISTMILL_CONFIG` | All | Config file path (default: `~/.gristmill/config.yaml`) |
+| `GRISTMILL_SOCK` | Daemon + TS shell | Unix socket path (default: `~/.gristmill/gristmill.sock`) |
+| `TRAINER_URL` | TypeScript shell | Trainer API base URL (default: `http://127.0.0.1:7432`) |
+| `GRISTMILL_MOCK_BRIDGE` | TypeScript | Set to `1` to skip native `.node` bridge (dev/test only) |
 | `RUST_LOG` | Rust core | Log filter, e.g. `RUST_LOG=grist_sieve=debug` |

@@ -1,6 +1,8 @@
 """FastAPI health and status API for gristmill-trainer (Section 4.6.5).
 
-Listens on localhost:7432.  All endpoints return JSON.
+Listens on $TRAINER_API_HOST:$TRAINER_API_PORT (default 127.0.0.1:7432).
+Set TRAINER_API_HOST=0.0.0.0 in Docker so the gristmill container can reach it.
+All endpoints return JSON.
 
 Endpoints:
     GET  /health                           — liveness + last heartbeat seen
@@ -24,6 +26,7 @@ Endpoints:
 from __future__ import annotations
 
 import logging
+import os
 from typing import TYPE_CHECKING
 
 from fastapi import FastAPI, HTTPException, Query
@@ -35,8 +38,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-API_HOST = "127.0.0.1"
-API_PORT = 7432
+# Bind to 0.0.0.0 in Docker so the gristmill container can reach us via the
+# Docker bridge network.  Defaults to loopback for local (non-container) use.
+API_HOST = os.environ.get("TRAINER_API_HOST", "127.0.0.1")
+API_PORT = int(os.environ.get("TRAINER_API_PORT", "7432"))
 
 
 def create_app(service: "GristMillTrainerService") -> FastAPI:
