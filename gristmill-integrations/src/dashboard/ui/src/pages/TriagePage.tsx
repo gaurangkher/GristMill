@@ -127,6 +127,12 @@ export default function TriagePage() {
           </button>
         </div>
 
+        {loading && (
+          <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 10 }}>
+            First request after startup may take up to 30 s while the ONNX model warms up.
+          </p>
+        )}
+
         {/* Example prompts */}
         <div style={{ marginTop: 14, borderTop: "1px solid var(--border)", paddingTop: 12 }}>
           <span style={{ fontSize: 12, color: "var(--text-muted)" }}>Examples: </span>

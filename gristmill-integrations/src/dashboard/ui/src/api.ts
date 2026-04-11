@@ -192,8 +192,11 @@ export const api = {
   metricsBudget: () => get<MetricsBudget>("/api/metrics/budget"),
   metricsHealth: () => get<MetricsHealth>("/api/metrics/health"),
 
+  // 30 s timeout: the first triage call after a daemon restart triggers ONNX
+  // Runtime thread-pool init + model load from disk (can take 10-30 s on CPU).
+  // Subsequent calls hit the <5 ms target once the model is warm.
   triage: (text: string, channel = "cli") =>
-    post<RouteDecision>("/api/triage", { text, channel }, 5_000),
+    post<RouteDecision>("/api/triage", { text, channel }, 30_000),
 
   pipelineIds: () => get<{ pipelines: string[] }>("/api/pipelines"),
   pipelineRegister: (pipeline: Record<string, unknown>) =>
