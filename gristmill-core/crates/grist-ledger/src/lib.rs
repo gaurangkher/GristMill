@@ -261,11 +261,44 @@ impl Ledger {
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
-        // ── Touch accessed memories ────────────────────────────────────────
+        // ── Hot-tier keyword search (catches recently stored memories not yet in warm) ──
+        // Memories live in the hot LRU until the LRU is full (4096 entries) and they
+        // are evicted.  Without this pass, newly stored memories are invisible to
+        // recall until eviction completes.
+        let hot_ref = Arc::clone(&self.hot);
+        let q_hot = query.to_owned();
+        let hot_limit = limit;
+        let hot_matches = tokio::task::spawn_blocking(move || {
+            hot_ref.keyword_search(&q_hot, hot_limit)
+        })
+        .await
+        .map_err(|e| LedgerError::Other(e.into()))?;
+
+        // Merge hot results; skip any IDs already present in the warm-ranked list.
+        let warm_ids: std::collections::HashSet<&str> =
+            ranked.iter().map(|r| r.memory.id.as_str()).collect();
+
+        let mut hot_ranked: Vec<RankedMemory> = hot_matches
+            .into_iter()
+            .filter(|(mem, _)| !warm_ids.contains(mem.id.as_str()))
+            .map(|(mem, _)| RankedMemory {
+                memory: mem,
+                // Nominal score: below any typical warm RRF score so warm results
+                // sort first, but hot results are still visible.
+                score: 0.01,
+                sources: vec![SearchSource::Keyword],
+            })
+            .collect();
+
+        ranked.append(&mut hot_ranked);
+
+        // ── Touch accessed warm memories ────────────────────────────────────────
         for r in &ranked {
-            let warm_touch = Arc::clone(&self.warm);
-            let id = r.memory.id.clone();
-            let _ = tokio::task::spawn_blocking(move || warm_touch.touch(&id)).await;
+            if r.memory.tier == crate::memory::Tier::Warm {
+                let warm_touch = Arc::clone(&self.warm);
+                let id = r.memory.id.clone();
+                let _ = tokio::task::spawn_blocking(move || warm_touch.touch(&id)).await;
+            }
         }
 
         metrics::histogram!("ledger.recall.results_count").record(ranked.len() as f64);

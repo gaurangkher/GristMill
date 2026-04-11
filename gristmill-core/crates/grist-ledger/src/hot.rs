@@ -133,6 +133,48 @@ impl HotTier {
     pub fn lru_len(&self) -> usize {
         self.lru.lock().len()
     }
+
+    /// Keyword search across the in-memory LRU.
+    ///
+    /// Each query word must appear (case-insensitive substring) in the memory's
+    /// content or tags for the entry to match.  Results are ordered by
+    /// `last_accessed_ms` descending (most-recently used first), then truncated
+    /// to `limit`.
+    ///
+    /// This intentionally does **not** search the sled backing store — sled only
+    /// holds entries that have already been evicted from the LRU and are waiting
+    /// for warm-tier promotion, so they will be picked up by the warm search once
+    /// the eviction drainer has processed them.
+    pub fn keyword_search(&self, query: &str, limit: usize) -> Vec<(Memory, Vec<f32>)> {
+        let terms: Vec<String> = query
+            .split_whitespace()
+            .map(|t| t.to_lowercase())
+            .filter(|t| !t.is_empty())
+            .collect();
+
+        if terms.is_empty() || limit == 0 {
+            return vec![];
+        }
+
+        let lru = self.lru.lock();
+        let mut matches: Vec<(Memory, Vec<f32>)> = lru
+            .iter()
+            .filter(|(_, (mem, _))| {
+                let haystack = format!(
+                    "{} {}",
+                    mem.content.to_lowercase(),
+                    mem.tags.join(" ").to_lowercase()
+                );
+                terms.iter().any(|t| haystack.contains(t.as_str()))
+            })
+            .map(|(_, (mem, emb))| (mem.clone(), emb.clone()))
+            .collect();
+
+        // Most-recently used first.
+        matches.sort_by(|a, b| b.0.last_accessed_ms.cmp(&a.0.last_accessed_ms));
+        matches.truncate(limit);
+        matches
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

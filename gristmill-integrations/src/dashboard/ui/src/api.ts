@@ -214,10 +214,13 @@ export const api = {
 
   // ── Memory ─────────────────────────────────────────────────────────────────
 
+  // Memory ops use a longer timeout: ONNX inference (MiniLM embedding) on CPU
+  // can take several seconds, and the IpcBridge is sequential so a remember()
+  // that's still in-flight will delay recall().
   memoryRecall: (query: string, limit = 10) =>
-    post<RankedMemoryItem[]>("/api/memory/recall", { query, limit }),
+    post<RankedMemoryItem[]>("/api/memory/recall", { query, limit }, 30_000),
   memoryRemember: (content: string, tags: string[] = []) =>
-    post<{ id: string }>("/api/memory/remember", { content, tags }),
+    post<{ id: string }>("/api/memory/remember", { content, tags }, 30_000),
   memoryGet: (id: string) => get<MemoryItem | null>(`/api/memory/${id}`),
 
   // ── Watches ────────────────────────────────────────────────────────────────
