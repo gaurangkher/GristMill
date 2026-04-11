@@ -8,17 +8,29 @@ async function get<T>(path: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-async function post<T>(path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({})) as { error?: string; detail?: string };
-    throw new Error(err.detail ?? err.error ?? `${path} → ${res.status}`);
+async function post<T>(path: string, body?: unknown, timeoutMs = 10_000): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${BASE}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({})) as { error?: string; detail?: string };
+      throw new Error(err.detail ?? err.error ?? `${path} → ${res.status}`);
+    }
+    return res.json() as Promise<T>;
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new Error(`${path} timed out after ${timeoutMs / 1000}s`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
   }
-  return res.json() as Promise<T>;
 }
 
 async function patch<T>(path: string, body?: unknown): Promise<T> {
@@ -181,13 +193,13 @@ export const api = {
   metricsHealth: () => get<MetricsHealth>("/api/metrics/health"),
 
   triage: (text: string, channel = "cli") =>
-    post<RouteDecision>("/api/triage", { text, channel }),
+    post<RouteDecision>("/api/triage", { text, channel }, 5_000),
 
   pipelineIds: () => get<{ pipelines: string[] }>("/api/pipelines"),
   pipelineRegister: (pipeline: Record<string, unknown>) =>
     post<{ registered: boolean; id: string }>("/api/pipelines", pipeline),
   pipelineRun: (id: string, payload: unknown = {}) =>
-    post<{ pipelineId: string; result: unknown }>(`/api/pipelines/${id}/run`, payload),
+    post<{ pipelineId: string; result: unknown }>(`/api/pipelines/${id}/run`, payload, 60_000),
 
   // kept for backward compat — returns run stubs if bridge supports it
   pipelines: () => get<PipelineRun[]>("/api/pipelines"),

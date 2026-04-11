@@ -4,6 +4,15 @@ set -e
 CONFIG="${GRISTMILL_CONFIG:-/data/gristmill/config.yaml}"
 SOCK="${GRISTMILL_SOCK:-/data/gristmill/gristmill.sock}"
 
+# ── Fix named-volume permissions (runs as root before dropping to gristmill) ──
+# The /gristmill/run directory lives on a named Docker volume which Docker
+# creates as root:root.  The Rust daemon writes inference.lock and the trainer
+# writes trainer.sock there — both need gristmill ownership.
+mkdir -p /gristmill/run
+chown gristmill:gristmill /gristmill/run
+chmod 750 /gristmill/run
+echo "[entrypoint] /gristmill/run ready (owner: gristmill)"
+
 # ── Validate config ───────────────────────────────────────────────────────────
 if [ ! -f "$CONFIG" ]; then
   echo "[entrypoint] ERROR: config file not found at $CONFIG"
@@ -32,9 +41,10 @@ mkdir -p \
 
 echo "[entrypoint] Config:  $CONFIG"
 echo "[entrypoint] Socket:  $SOCK"
-echo "[entrypoint] Starting GristMill daemon..."
+echo "[entrypoint] Starting GristMill daemon (as gristmill user)..."
 
-gristmill-daemon &
+# ── Start daemon as gristmill user (gosu for correct signal handling) ─────────
+gosu gristmill gristmill-daemon &
 DAEMON_PID=$!
 
 # ── Wait for socket (up to 15s) ───────────────────────────────────────────────
@@ -50,5 +60,5 @@ if [ ! -S "$SOCK" ]; then
   exit 1
 fi
 
-echo "[entrypoint] Daemon ready. Starting TypeScript shell..."
-exec node dist/main.js
+echo "[entrypoint] Daemon ready. Starting TypeScript shell (as gristmill user)..."
+exec gosu gristmill node dist/main.js

@@ -57,8 +57,11 @@ LABEL org.opencontainers.image.created="${BUILD_DATE}"
 LABEL org.opencontainers.image.revision="${GIT_SHA}"
 
 # Install only runtime dependencies
+# gosu is used by the entrypoint to drop from root → gristmill user after
+# fixing named-volume permissions on /gristmill/run.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
+    gosu \
     && rm -rf /var/lib/apt/lists/*
 
 RUN npm install -g pnpm@9
@@ -95,7 +98,9 @@ RUN mkdir -p /data/gristmill/feedback \
              /data/gristmill/plugins \
     && chown -R gristmill:gristmill /app /data
 
-USER gristmill
+# NOTE: We intentionally do NOT set USER here.
+# The entrypoint runs as root, fixes named-volume permissions on /gristmill/run,
+# then uses gosu to drop to the gristmill user for both the daemon and the TS shell.
 
 # Config via environment or mounted file
 ENV GRISTMILL_CONFIG=/data/gristmill/config.yaml
