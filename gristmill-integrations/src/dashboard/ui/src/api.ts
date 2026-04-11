@@ -81,6 +81,15 @@ export interface MetricsHealth {
   timestamp: string;
 }
 
+export interface RouteDecision {
+  route: "LOCAL_ML" | "RULES" | "HYBRID" | "LLM_NEEDED";
+  confidence: number;
+  modelId?: string;
+  reason?: string;
+  estimatedTokens?: number;
+  latency_ms?: number;
+}
+
 export interface PipelineRun {
   id: string;
   started_at: string;
@@ -162,6 +171,7 @@ export const api = {
   trainerHealth: () => get<HealthInfo>("/api/trainer/health"),
   trainerStatus: () => get<TrainerStatus>("/api/trainer/status"),
   trainerHistory: () => get<CycleSummary[]>("/api/trainer/history"),
+  trainerValidation: () => get<Record<string, unknown>>("/api/trainer/validation/latest"),
   trainerPause: () => post<{ paused: boolean }>("/api/trainer/pause"),
   trainerResume: () => post<{ paused: boolean }>("/api/trainer/resume"),
   trainerRollback: (version: number) =>
@@ -170,6 +180,16 @@ export const api = {
   metricsBudget: () => get<MetricsBudget>("/api/metrics/budget"),
   metricsHealth: () => get<MetricsHealth>("/api/metrics/health"),
 
+  triage: (text: string, channel = "cli") =>
+    post<RouteDecision>("/api/triage", { text, channel }),
+
+  pipelineIds: () => get<{ pipelines: string[] }>("/api/pipelines"),
+  pipelineRegister: (pipeline: Record<string, unknown>) =>
+    post<{ registered: boolean; id: string }>("/api/pipelines", pipeline),
+  pipelineRun: (id: string, payload: unknown = {}) =>
+    post<{ pipelineId: string; result: unknown }>(`/api/pipelines/${id}/run`, payload),
+
+  // kept for backward compat — returns run stubs if bridge supports it
   pipelines: () => get<PipelineRun[]>("/api/pipelines"),
 
   ecosystemStatus: () => get<EcosystemStatus>("/api/ecosystem/status"),
