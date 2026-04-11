@@ -132,6 +132,7 @@ function ValidationReport({ available }: { available: boolean }) {
 
 export default function TrainerPage() {
   const [health, setHealth] = useState<HealthInfo | null>(null);
+  const [trainerChecked, setTrainerChecked] = useState(false);
   const [status, setStatus] = useState<TrainerStatus | null>(null);
   const [history, setHistory] = useState<CycleSummary[]>([]);
   const [busy, setBusy] = useState(false);
@@ -139,7 +140,9 @@ export default function TrainerPage() {
   const [rollingBack, setRollingBack] = useState<number | null>(null);
 
   const load = useCallback(() => {
-    api.trainerHealth().then(setHealth).catch(() => {});
+    api.trainerHealth()
+      .then((h) => { setHealth(h); setTrainerChecked(true); })
+      .catch(() => { setHealth(null); setTrainerChecked(true); });
     api.trainerStatus().then(setStatus).catch(() => {});
     api.trainerHistory().then(setHistory).catch(() => {});
   }, []);
@@ -198,7 +201,10 @@ export default function TrainerPage() {
         {msg && (
           <p style={{ marginTop: 12, color: msg.startsWith("Error") ? "var(--red)" : "var(--green)", fontSize: 13 }}>{msg}</p>
         )}
-        {!trainerAvailable && (
+        {!trainerChecked && (
+          <p style={{ marginTop: 12, color: "var(--text-muted)", fontSize: 13 }}>Checking trainer status…</p>
+        )}
+        {trainerChecked && !trainerAvailable && (
           <p style={{ marginTop: 12, color: "var(--text-muted)", fontSize: 13 }}>
             Trainer service offline — run{" "}
             <code>docker compose --profile trainer up -d</code>{" "}
