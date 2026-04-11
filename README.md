@@ -279,10 +279,15 @@ docker compose logs -f trainer
 docker compose build gristmill && docker compose up -d gristmill
 
 # Stop everything (data preserved)
-docker compose down
+# Use the same --profile flag you passed to `up`, or containers
+# started under other profiles will keep the network open and
+# docker compose down will warn "Network ... is still in use".
+docker compose --profile full down          # if started with --profile full
+docker compose --profile trainer down       # if started with --profile trainer
+docker compose down --remove-orphans        # catches any profile
 
 # Stop and wipe runtime data (models, memory, feedback)
-docker compose down -v
+docker compose --profile full down -v
 ```
 
 ---
