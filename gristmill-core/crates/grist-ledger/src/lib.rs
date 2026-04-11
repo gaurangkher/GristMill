@@ -115,8 +115,12 @@ impl Ledger {
 
         // ── Eviction-drainer task ──────────────────────────────────────────
         // Receives entries evicted from the hot LRU and inserts them into warm.
+        // The drainer also owns embedding: memories stored via remember() carry a
+        // zero-vector placeholder so that remember() never blocks on ONNX inference.
+        // The real embedding is computed here, asynchronously, before warm insert.
         let warm_for_evict = Arc::clone(&warm);
-        let evict_task = tokio::spawn(eviction_drainer(evict_rx, warm_for_evict));
+        let embedder_for_evict = Arc::clone(&embedder);
+        let evict_task = tokio::spawn(eviction_drainer(evict_rx, warm_for_evict, embedder_for_evict));
 
         // ── Compactor ─────────────────────────────────────────────────────
         let compactor = Compactor::spawn(Arc::clone(&warm), Arc::clone(&cold), compactor_cfg);
@@ -136,10 +140,13 @@ impl Ledger {
 
     /// Store a memory in the ledger.
     ///
-    /// 1. Computes an embedding for `content`.
-    /// 2. Checks the warm tier for a semantic duplicate (sim ≥ 0.95).
-    ///    - If found: merges the content and returns the existing ID.
-    ///    - If not found: inserts into the hot tier (cascades to warm on eviction).
+    /// Inserts into the hot tier immediately with a zero-vector placeholder.
+    /// The real embedding is computed asynchronously by the eviction drainer
+    /// when the memory cascades to the warm tier, keeping this call fast
+    /// regardless of ONNX inference latency.
+    ///
+    /// Semantic deduplication (sim ≥ 0.95) is attempted only when the warm
+    /// tier already has indexed entries — it is skipped on first use.
     pub async fn remember(
         &self,
         content: impl Into<String>,
@@ -148,35 +155,54 @@ impl Ledger {
         let content: String = content.into();
         let memory = Memory::new(content.clone(), tags);
 
-        // ── Embed ──────────────────────────────────────────────────────────
-        let embedder = Arc::clone(&self.embedder);
-        let text = content.clone();
-        let embedding = tokio::task::spawn_blocking(move || embedder.embed(&text))
-            .await
-            .map_err(|e| LedgerError::Other(e.into()))??;
+        // ── Duplicate check (only when warm has entries) ───────────────────
+        // Skipped on first use: avoids a costly ONNX embed call when the warm
+        // tier is empty and there is nothing to deduplicate against.
+        let warm_count = {
+            let warm = Arc::clone(&self.warm);
+            tokio::task::spawn_blocking(move || warm.count())
+                .await
+                .map_err(|e| LedgerError::Other(e.into()))??
+        };
 
-        // ── Duplicate check in warm ────────────────────────────────────────
-        let warm = Arc::clone(&self.warm);
-        let emb_clone = embedding.clone();
-        let existing = tokio::task::spawn_blocking(move || warm.find_similar(&emb_clone, 0.95))
-            .await
-            .map_err(|e| LedgerError::Other(e.into()))??;
-
-        if let Some(existing_mem) = existing {
-            debug!(existing_id = %existing_mem.id, "duplicate memory found — merging");
-            let warm2 = Arc::clone(&self.warm);
-            let new_mem = memory.clone();
-            let eid = existing_mem.id.clone();
-            tokio::task::spawn_blocking(move || warm2.merge(&eid, &new_mem))
+        if warm_count > 0 {
+            let embedder = Arc::clone(&self.embedder);
+            let text = content.clone();
+            let embedding = tokio::task::spawn_blocking(move || embedder.embed(&text))
                 .await
                 .map_err(|e| LedgerError::Other(e.into()))??;
-            metrics::counter!("ledger.remember.duplicates").increment(1);
-            return Ok(existing_mem.id);
+
+            let warm = Arc::clone(&self.warm);
+            let emb_clone = embedding.clone();
+            let existing =
+                tokio::task::spawn_blocking(move || warm.find_similar(&emb_clone, 0.95))
+                    .await
+                    .map_err(|e| LedgerError::Other(e.into()))??;
+
+            if let Some(existing_mem) = existing {
+                debug!(existing_id = %existing_mem.id, "duplicate memory found — merging");
+                let warm2 = Arc::clone(&self.warm);
+                let new_mem = memory.clone();
+                let eid = existing_mem.id.clone();
+                tokio::task::spawn_blocking(move || warm2.merge(&eid, &new_mem))
+                    .await
+                    .map_err(|e| LedgerError::Other(e.into()))??;
+                metrics::counter!("ledger.remember.duplicates").increment(1);
+                return Ok(existing_mem.id);
+            }
+
+            // Insert with the real embedding so usearch gets it on eviction.
+            let id = self.hot.insert(memory, embedding)?;
+            debug!(memory_id = %id, "memory stored in hot tier (with embedding)");
+            metrics::counter!("ledger.remember.total").increment(1);
+            return Ok(id);
         }
 
-        // ── Insert into hot ────────────────────────────────────────────────
-        let id = self.hot.insert(memory, embedding)?;
-        debug!(memory_id = %id, "memory stored in hot tier");
+        // ── Fast path: warm is empty, defer embedding to eviction drainer ──
+        // The drainer will compute the real embedding before inserting into warm.
+        let placeholder = vec![0.0f32; self.embedder.dim()];
+        let id = self.hot.insert(memory, placeholder)?;
+        debug!(memory_id = %id, "memory stored in hot tier (embedding deferred)");
         metrics::counter!("ledger.remember.total").increment(1);
         Ok(id)
     }
@@ -185,32 +211,51 @@ impl Ledger {
     ///
     /// Runs keyword search and vector search in parallel against the warm tier,
     /// then fuses the results via Reciprocal Rank Fusion.
+    /// When the warm tier is empty the embedding step is skipped entirely to
+    /// avoid blocking on ONNX inference when there is nothing to search.
     pub async fn recall(
         &self,
         query: &str,
         limit: usize,
     ) -> Result<Vec<RankedMemory>, LedgerError> {
-        // ── Embed query ────────────────────────────────────────────────────
-        let embedder = Arc::clone(&self.embedder);
-        let q = query.to_owned();
-        let embedding = tokio::task::spawn_blocking(move || embedder.embed(&q))
-            .await
-            .map_err(|e| LedgerError::Other(e.into()))??;
+        // ── Check warm tier size ────────────────────────��──────────────────
+        // Skip embedding + vector search when warm is empty: there is nothing
+        // to match against and the ONNX call would block for 10-30 s on CPU.
+        let warm_count = {
+            let warm = Arc::clone(&self.warm);
+            tokio::task::spawn_blocking(move || warm.count())
+                .await
+                .map_err(|e| LedgerError::Other(e.into()))??
+        };
 
-        // ── Parallel warm searches ─────────────────────────────────────────
-        let warm_kw = Arc::clone(&self.warm);
-        let warm_vec = Arc::clone(&self.warm);
-        let q_kw = query.to_owned();
-        let emb_vec = embedding.clone();
-        let limit2 = limit * 2;
+        let (keyword_hits, vector_hits) = if warm_count > 0 {
+            // ── Embed query ────────────────────────────────────────────────
+            let embedder = Arc::clone(&self.embedder);
+            let q = query.to_owned();
+            let embedding = tokio::task::spawn_blocking(move || embedder.embed(&q))
+                .await
+                .map_err(|e| LedgerError::Other(e.into()))??;
 
-        let (kw_result, vec_result) = tokio::join!(
-            tokio::task::spawn_blocking(move || warm_kw.keyword_search(&q_kw, limit2)),
-            tokio::task::spawn_blocking(move || warm_vec.vector_search(&emb_vec, limit2)),
-        );
+            // ── Parallel warm searches ──────────────────────��──────────────
+            let warm_kw = Arc::clone(&self.warm);
+            let warm_vec = Arc::clone(&self.warm);
+            let q_kw = query.to_owned();
+            let emb_vec = embedding.clone();
+            let limit2 = limit * 2;
 
-        let keyword_hits = kw_result.map_err(|e| LedgerError::Other(e.into()))??;
-        let vector_hits = vec_result.map_err(|e| LedgerError::Other(e.into()))??;
+            let (kw_result, vec_result) = tokio::join!(
+                tokio::task::spawn_blocking(move || warm_kw.keyword_search(&q_kw, limit2)),
+                tokio::task::spawn_blocking(move || warm_vec.vector_search(&emb_vec, limit2)),
+            );
+
+            (
+                kw_result.map_err(|e| LedgerError::Other(e.into()))??,
+                vec_result.map_err(|e| LedgerError::Other(e.into()))??,
+            )
+        } else {
+            // Warm tier empty — skip ONNX; hot-tier search below still runs.
+            (vec![], vec![])
+        };
 
         // ── RRF fusion ─────────────────────────────────────────────────────
         let fused = reciprocal_rank_fusion(&keyword_hits, &vector_hits, limit);
@@ -328,12 +373,42 @@ impl Ledger {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Background task: receives hot-tier evictions and inserts them into warm.
+///
+/// Memories stored via the fast `remember()` path carry a zero-vector
+/// placeholder instead of a real embedding.  The drainer detects these and
+/// computes the real embedding here — asynchronously and off the request path
+/// — before inserting into the warm tier so vector search stays accurate.
 async fn eviction_drainer(
     mut rx: mpsc::UnboundedReceiver<(Memory, Vec<f32>)>,
     warm: Arc<WarmTier>,
+    embedder: Arc<dyn Embedder>,
 ) {
     while let Some((memory, embedding)) = rx.recv().await {
         let id = memory.id.clone();
+
+        // If the embedding is a zero-placeholder (fast-path remember()), compute
+        // the real embedding now before inserting into the warm tier.
+        let embedding = if embedding.iter().all(|&x| x == 0.0) {
+            let text = memory.content.clone();
+            let emb = Arc::clone(&embedder);
+            match tokio::task::spawn_blocking(move || emb.embed(&text)).await {
+                Ok(Ok(real)) => {
+                    debug!(memory_id = %id, "eviction drainer: computed deferred embedding");
+                    real
+                }
+                Ok(Err(e)) => {
+                    warn!(memory_id = %id, error = %e, "eviction drainer: embed failed, using zeros");
+                    embedding
+                }
+                Err(e) => {
+                    warn!(memory_id = %id, error = %e, "eviction drainer: spawn_blocking panicked, using zeros");
+                    embedding
+                }
+            }
+        } else {
+            embedding
+        };
+
         let warm2 = Arc::clone(&warm);
         if let Err(e) = tokio::task::spawn_blocking(move || {
             let mut m = memory.clone();
