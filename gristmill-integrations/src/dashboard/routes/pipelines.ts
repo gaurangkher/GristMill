@@ -31,13 +31,13 @@ export async function pipelinesRoutes(
       },
     },
     async (req, reply) => {
-      bridge.registerPipeline(req.body);
+      await bridge.registerPipeline(req.body);
       return reply.code(201).send({ registered: true, id: req.body["id"] });
     },
   );
 
   app.get("/", async (_req, reply) => {
-    const ids = bridge.pipelineIds();
+    const ids = await bridge.pipelineIds();
     return reply.send({ pipelines: ids });
   });
 

@@ -232,13 +232,12 @@ export class IpcBridge implements IBridge {
     return result as EscalationResult;
   }
 
-  registerPipeline(pipeline: object): void {
-    // Fire-and-forget: daemon receives the pipeline but we don't await.
-    this.send({
+  async registerPipeline(pipeline: object): Promise<void> {
+    // Await the daemon's acknowledgement so callers know the pipeline is live
+    // before they query pipelineIds().
+    await this.send({
       method: "register_pipeline",
       params: { pipeline_json: JSON.stringify(pipeline) },
-    }).catch((err) => {
-      console.error("[IpcBridge] registerPipeline failed:", err);
     });
   }
 
@@ -253,14 +252,7 @@ export class IpcBridge implements IBridge {
     return result as PipelineResult;
   }
 
-  pipelineIds(): string[] {
-    // IPC is async but IBridge declares this sync — return cached value.
-    // Callers that need an up-to-date list should await getPipelineIds().
-    return [];
-  }
-
-  /** Async variant of pipelineIds() — use this when you need the real list. */
-  async getPipelineIds(): Promise<string[]> {
+  async pipelineIds(): Promise<string[]> {
     const result = await this.send({ method: "pipeline_ids" });
     return result as string[];
   }

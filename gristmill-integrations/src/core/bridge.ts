@@ -74,9 +74,9 @@ export interface IBridge {
   recall(query: string, limit?: number): Promise<RankedMemory[]>;
   getMemory(id: string): Promise<Memory | null>;
   escalate(prompt: string, maxTokens?: number): Promise<EscalationResult>;
-  registerPipeline(pipeline: object): void;
+  registerPipeline(pipeline: object): Promise<void>;
   runPipeline(pipelineId: string, event: GristEventInit): Promise<PipelineResult>;
-  pipelineIds(): string[];
+  pipelineIds(): Promise<string[]>;
   buildEventJson(channel: string, payload: unknown): string;
   subscribe(topic: string): AsyncIterable<unknown>;
 }
@@ -132,7 +132,7 @@ class NativeBridge implements IBridge {
     return JSON.parse(json) as EscalationResult;
   }
 
-  registerPipeline(pipeline: object): void {
+  async registerPipeline(pipeline: object): Promise<void> {
     this.native.registerPipeline(JSON.stringify(pipeline));
   }
 
@@ -147,7 +147,7 @@ class NativeBridge implements IBridge {
     return JSON.parse(json) as PipelineResult;
   }
 
-  pipelineIds(): string[] {
+  async pipelineIds(): Promise<string[]> {
     return this.native.pipelineIds();
   }
 
@@ -223,7 +223,7 @@ export class MockBridge implements IBridge {
     };
   }
 
-  registerPipeline(pipeline: object & { id?: string }): void {
+  async registerPipeline(pipeline: object & { id?: string }): Promise<void> {
     const id = (pipeline as { id: string }).id;
     if (id) this.pipelines.set(id, pipeline);
   }
@@ -241,7 +241,7 @@ export class MockBridge implements IBridge {
     };
   }
 
-  pipelineIds(): string[] {
+  async pipelineIds(): Promise<string[]> {
     return [...this.pipelines.keys()];
   }
 
