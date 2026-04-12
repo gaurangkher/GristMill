@@ -13,6 +13,7 @@
 
 #[cfg(feature = "onnx")]
 use tracing::info;
+#[cfg(not(feature = "onnx"))]
 use tracing::warn;
 
 use crate::config::ModelConfig;
@@ -27,7 +28,7 @@ use crate::session::{GrindersSession, SessionKind};
 pub fn load_onnx_session(config: &ModelConfig) -> Result<GrindersSession, GrindersError> {
     #[cfg(feature = "onnx")]
     {
-        return load_onnx_real(config);
+        load_onnx_real(config)
     }
 
     #[cfg(not(feature = "onnx"))]

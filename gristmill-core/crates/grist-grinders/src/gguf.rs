@@ -13,6 +13,7 @@
 
 #[cfg(feature = "gguf")]
 use tracing::info;
+#[cfg(not(feature = "gguf"))]
 use tracing::warn;
 
 use crate::config::ModelConfig;
@@ -26,7 +27,7 @@ use crate::session::{GrindersSession, SessionKind};
 pub fn load_gguf_session(config: &ModelConfig) -> Result<GrindersSession, GrindersError> {
     #[cfg(feature = "gguf")]
     {
-        return load_gguf_real(config);
+        load_gguf_real(config)
     }
 
     #[cfg(not(feature = "gguf"))]
@@ -62,8 +63,6 @@ pub fn load_gguf_session(config: &ModelConfig) -> Result<GrindersSession, Grinde
 /// llama_cpp types directly.
 #[cfg(feature = "gguf")]
 fn load_gguf_real(config: &ModelConfig) -> Result<GrindersSession, GrindersError> {
-    use crate::session::GgufContext;
-
     if !config.path.exists() {
         return Err(GrindersError::ModelLoadFailed {
             model_id: config.model_id.clone(),
@@ -117,8 +116,6 @@ struct LlamaCppCtx {
 #[cfg(feature = "gguf")]
 impl crate::session::GgufContext for LlamaCppCtx {
     fn generate(&self, prompt: &str, max_tokens: usize) -> Result<String, GrindersError> {
-        use std::io::Write;
-
         // Create a new session for each inference call.
         // llama_cpp::LlamaModel::create_session() is the standard entrypoint.
         let mut session = self

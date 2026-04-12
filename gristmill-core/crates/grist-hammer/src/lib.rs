@@ -39,6 +39,12 @@ pub use types::{BudgetInfo, EscalationRequest, EscalationResponse, Provider, Pro
 // Hammer
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Waiters map used by the singleflight deduplicator.
+///
+/// Key: SHA-256 hex of the prompt.
+/// Value: list of `oneshot` senders waiting on the in-flight request.
+type InflightMap = HashMap<String, Vec<oneshot::Sender<Result<EscalationResponse, HammerError>>>>;
+
 /// Thread-safe LLM escalation gateway.
 ///
 /// **Requires an active Tokio runtime** (see [`Hammer::new`]).
@@ -55,8 +61,7 @@ pub struct Hammer {
     /// leader has populated the cache) subscribes here instead of issuing a
     /// second provider call.  This prevents duplicate requests to Anthropic/Ollama
     /// when two identical prompts arrive concurrently.
-    inflight:
-        Arc<Mutex<HashMap<String, Vec<oneshot::Sender<Result<EscalationResponse, HammerError>>>>>>,
+    inflight: Arc<Mutex<InflightMap>>,
 }
 
 impl Hammer {
