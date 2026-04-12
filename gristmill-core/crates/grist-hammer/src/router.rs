@@ -170,12 +170,15 @@ impl RequestRouter {
         // ── Production path ───────────────────────────────────────────────
         // Priority order: Ollama (local, training-eligible) → Anthropic primary
         // → Anthropic fallback.  See module-level doc for rationale.
+        // Ollama is skipped entirely when `providers.ollama.enabled = false`.
 
         // 1. Try Ollama first (local open-source — training buffer eligible).
-        match self.call_ollama(req).await {
-            Ok(resp) => return Ok(self.make_response(req, resp, Provider::Ollama, start)),
-            Err(e) => {
-                warn!(provider = "ollama", error = %e, "Ollama unavailable, falling back to Anthropic primary");
+        if self.config.providers.ollama.enabled {
+            match self.call_ollama(req).await {
+                Ok(resp) => return Ok(self.make_response(req, resp, Provider::Ollama, start)),
+                Err(e) => {
+                    warn!(provider = "ollama", error = %e, "Ollama unavailable, falling back to Anthropic primary");
+                }
             }
         }
 

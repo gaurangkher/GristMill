@@ -265,6 +265,9 @@ impl Default for AnthropicProviderConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct OllamaProviderConfig {
+    /// Set to `false` to skip Ollama entirely (no warning spam when Ollama is
+    /// not installed).  Defaults to `true` so existing deployments are unaffected.
+    pub enabled: bool,
     pub base_url: String,
     pub model: String,
 }
@@ -272,6 +275,7 @@ pub struct OllamaProviderConfig {
 impl Default for OllamaProviderConfig {
     fn default() -> Self {
         Self {
+            enabled: true,
             base_url: "http://localhost:11434".to_string(),
             model: "llama3.1:8b".to_string(),
         }

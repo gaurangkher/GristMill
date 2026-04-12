@@ -120,7 +120,11 @@ impl Ledger {
         // The real embedding is computed here, asynchronously, before warm insert.
         let warm_for_evict = Arc::clone(&warm);
         let embedder_for_evict = Arc::clone(&embedder);
-        let evict_task = tokio::spawn(eviction_drainer(evict_rx, warm_for_evict, embedder_for_evict));
+        let evict_task = tokio::spawn(eviction_drainer(
+            evict_rx,
+            warm_for_evict,
+            embedder_for_evict,
+        ));
 
         // ── Compactor ─────────────────────────────────────────────────────
         let compactor = Compactor::spawn(Arc::clone(&warm), Arc::clone(&cold), compactor_cfg);
@@ -174,10 +178,9 @@ impl Ledger {
 
             let warm = Arc::clone(&self.warm);
             let emb_clone = embedding.clone();
-            let existing =
-                tokio::task::spawn_blocking(move || warm.find_similar(&emb_clone, 0.95))
-                    .await
-                    .map_err(|e| LedgerError::Other(e.into()))??;
+            let existing = tokio::task::spawn_blocking(move || warm.find_similar(&emb_clone, 0.95))
+                .await
+                .map_err(|e| LedgerError::Other(e.into()))??;
 
             if let Some(existing_mem) = existing {
                 debug!(existing_id = %existing_mem.id, "duplicate memory found — merging");
@@ -313,11 +316,10 @@ impl Ledger {
         let hot_ref = Arc::clone(&self.hot);
         let q_hot = query.to_owned();
         let hot_limit = limit;
-        let hot_matches = tokio::task::spawn_blocking(move || {
-            hot_ref.keyword_search(&q_hot, hot_limit)
-        })
-        .await
-        .map_err(|e| LedgerError::Other(e.into()))?;
+        let hot_matches =
+            tokio::task::spawn_blocking(move || hot_ref.keyword_search(&q_hot, hot_limit))
+                .await
+                .map_err(|e| LedgerError::Other(e.into()))?;
 
         // Merge hot results; skip any IDs already present in the warm-ranked list.
         let warm_ids: std::collections::HashSet<&str> =

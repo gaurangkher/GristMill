@@ -11,9 +11,11 @@
 //! [`Hammer::new`] is **synchronous** and requires an active Tokio runtime
 //! (it calls `tokio::spawn` internally via the batcher).
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use sha2::{Digest, Sha256};
+use tokio::sync::{oneshot, Mutex};
 use tracing::{debug, info};
 
 pub mod batcher;
@@ -37,6 +39,12 @@ pub use types::{BudgetInfo, EscalationRequest, EscalationResponse, Provider, Pro
 // Hammer
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Waiters map used by the singleflight deduplicator.
+///
+/// Key: SHA-256 hex of the prompt.
+/// Value: list of `oneshot` senders waiting on the in-flight request.
+type InflightMap = HashMap<String, Vec<oneshot::Sender<Result<EscalationResponse, HammerError>>>>;
+
 /// Thread-safe LLM escalation gateway.
 ///
 /// **Requires an active Tokio runtime** (see [`Hammer::new`]).
@@ -46,6 +54,14 @@ pub struct Hammer {
     batcher: RequestBatcher,
     // Keep router around so batcher can reference it.
     _router: Arc<RequestRouter>,
+    /// Singleflight map: prompt hash → waiters for the in-flight request.
+    ///
+    /// The first caller for a given hash is the "leader" and dispatches to the
+    /// batcher.  Any subsequent caller with the same hash (arriving before the
+    /// leader has populated the cache) subscribes here instead of issuing a
+    /// second provider call.  This prevents duplicate requests to Anthropic/Ollama
+    /// when two identical prompts arrive concurrently.
+    inflight: Arc<Mutex<InflightMap>>,
 }
 
 impl Hammer {
@@ -67,6 +83,7 @@ impl Hammer {
             cache: sem_cache,
             batcher,
             _router: router,
+            inflight: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 
@@ -77,9 +94,11 @@ impl Hammer {
     /// Steps:
     /// 1. Pre-flight budget check (no tokens consumed yet).
     /// 2. Semantic cache lookup (exact SHA-256 + optional fuzzy cosine).
-    /// 3. Route via batcher → provider.
-    /// 4. Record actual token usage.
-    /// 5. Store response in cache.
+    /// 3. Singleflight deduplication: if an identical prompt is already in-flight,
+    ///    subscribe to its result instead of issuing a second provider call.
+    /// 4. Route via batcher → provider (leader only).
+    /// 5. Record actual token usage and store response in cache (leader only).
+    /// 6. Fan out result to all waiters.
     pub async fn escalate(
         &self,
         req: EscalationRequest,
@@ -115,16 +134,65 @@ impl Hammer {
             }
         }
 
-        // 3. Dispatch via batcher.
+        // 3. Singleflight: deduplicate concurrent in-flight requests with the
+        //    same prompt hash so only one provider call is made.
+        let (is_leader, waiter_rx) = {
+            let mut inflight = self.inflight.lock().await;
+            if let Some(waiters) = inflight.get_mut(&hash) {
+                // A leader is already dispatching this prompt — register as waiter.
+                let (tx, rx) = oneshot::channel();
+                waiters.push(tx);
+                debug!(request_id = %req.id, "singleflight: waiting on in-flight request");
+                (false, Some(rx))
+            } else {
+                // No in-flight request for this hash — become the leader.
+                inflight.insert(hash.clone(), Vec::new());
+                (true, None)
+            }
+        };
+
+        if !is_leader {
+            return waiter_rx
+                .unwrap()
+                .await
+                .map_err(|_| HammerError::Config("singleflight: leader dropped channel".into()))?;
+        }
+
+        // 4. Leader: dispatch via batcher.
         let embedding = req.embedding.clone();
-        let mut resp = self.batcher.submit(req).await?;
+        let dispatch_result = self.batcher.submit(req).await;
 
-        // 4. Record usage.
-        self.budget.record_usage(resp.tokens_used);
+        // 5. Drain waiters from the inflight map regardless of success/error.
+        let waiters = {
+            let mut inflight = self.inflight.lock().await;
+            inflight.remove(&hash).unwrap_or_default()
+        };
 
-        // 5. Cache the response.
-        self.cache.put(hash, resp.clone(), embedding);
+        match &dispatch_result {
+            Ok(resp) => {
+                // Record usage and populate the cache so the next distinct request
+                // gets a cache hit instead of going to the provider again.
+                self.budget.record_usage(resp.tokens_used);
+                self.cache.put(hash, resp.clone(), embedding);
 
+                // Fan out to waiters.
+                for waiter in waiters {
+                    let mut r = resp.clone();
+                    r.cache_hit = false;
+                    let _ = waiter.send(Ok(r));
+                }
+            }
+            Err(e) => {
+                // Propagate error string to waiters; normalise to AllProvidersFailed
+                // since HammerError is not Clone.
+                let msg = e.to_string();
+                for waiter in waiters {
+                    let _ = waiter.send(Err(HammerError::AllProvidersFailed(msg.clone())));
+                }
+            }
+        }
+
+        let mut resp = dispatch_result?;
         resp.cache_hit = false;
         Ok(resp)
     }
@@ -218,6 +286,7 @@ mod tests {
             cache: SemanticCache::new(cache),
             batcher,
             _router: router,
+            inflight: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -356,5 +425,74 @@ mod tests {
         let h2 = sha256_hex("hello");
         assert_eq!(h1, h2);
         assert_ne!(sha256_hex("hello"), sha256_hex("world"));
+    }
+
+    #[tokio::test]
+    async fn singleflight_deduplicates_concurrent_identical_prompts() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        // Count how many times the provider is actually called.
+        let call_count = Arc::new(AtomicUsize::new(0));
+
+        struct CountingProvider {
+            count: Arc<AtomicUsize>,
+        }
+        impl ProviderFn for CountingProvider {
+            fn call(
+                &self,
+                req: &EscalationRequest,
+            ) -> Result<(String, u32, Provider), HammerError> {
+                self.count.fetch_add(1, Ordering::SeqCst);
+                // Small artificial delay so the second request arrives while the
+                // first is still in-flight (simulated by the batcher window).
+                Ok((
+                    format!("response:{}", req.prompt),
+                    10,
+                    Provider::AnthropicPrimary,
+                ))
+            }
+        }
+
+        let config = HammerConfig {
+            batch: BatchConfig {
+                enabled: true,
+                window_ms: 200,
+                max_batch_size: 10,
+            },
+            ..Default::default()
+        };
+        let providers: Vec<Arc<dyn ProviderFn>> = vec![Arc::new(CountingProvider {
+            count: Arc::clone(&call_count),
+        })];
+        let router = Arc::new(RequestRouter::with_mock_providers(
+            config.clone(),
+            providers,
+        ));
+        let batcher = RequestBatcher::new(config.batch.clone(), Arc::clone(&router));
+        let hammer = Arc::new(Hammer {
+            budget: BudgetManager::new(config.budget.clone()),
+            cache: SemanticCache::new(config.cache.clone()),
+            batcher,
+            _router: router,
+            inflight: Arc::new(Mutex::new(HashMap::new())),
+        });
+
+        // Fire two identical prompts concurrently.
+        let h1 = Arc::clone(&hammer);
+        let h2 = Arc::clone(&hammer);
+        let (r1, r2) = tokio::join!(
+            tokio::spawn(async move { h1.escalate(EscalationRequest::new("dup", 50)).await }),
+            tokio::spawn(async move { h2.escalate(EscalationRequest::new("dup", 50)).await }),
+        );
+
+        assert!(r1.unwrap().is_ok());
+        assert!(r2.unwrap().is_ok());
+        // Provider must have been called exactly once despite two concurrent requests.
+        assert_eq!(
+            call_count.load(Ordering::SeqCst),
+            1,
+            "singleflight should deduplicate: provider called {} times instead of 1",
+            call_count.load(Ordering::SeqCst)
+        );
     }
 }

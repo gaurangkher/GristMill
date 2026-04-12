@@ -39,8 +39,13 @@ export async function triageRoutes(
     },
     async (req, reply) => {
       const { text, channel = "cli" } = req.body;
-      const decision = await bridge.triage({ channel, payload: { text } });
-      return reply.send(decision);
+      try {
+        const decision = await bridge.triage({ channel, payload: { text } });
+        return reply.send(decision);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return reply.status(503).send({ error: msg });
+      }
     },
   );
 }

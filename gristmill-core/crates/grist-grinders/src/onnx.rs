@@ -13,6 +13,7 @@
 
 #[cfg(feature = "onnx")]
 use tracing::info;
+#[cfg(not(feature = "onnx"))]
 use tracing::warn;
 
 use crate::config::ModelConfig;
@@ -27,7 +28,7 @@ use crate::session::{GrindersSession, SessionKind};
 pub fn load_onnx_session(config: &ModelConfig) -> Result<GrindersSession, GrindersError> {
     #[cfg(feature = "onnx")]
     {
-        return load_onnx_real(config);
+        load_onnx_real(config)
     }
 
     #[cfg(not(feature = "onnx"))]
@@ -76,7 +77,7 @@ fn load_onnx_real(config: &ModelConfig) -> Result<GrindersSession, GrindersError
         "loading ONNX model",
     );
 
-    let session = ort::Session::builder()
+    let session = ort::session::Session::builder()
         .map_err(|e| GrindersError::ModelLoadFailed {
             model_id: config.model_id.clone(),
             reason: e.to_string(),
@@ -92,7 +93,7 @@ fn load_onnx_real(config: &ModelConfig) -> Result<GrindersSession, GrindersError
 
     Ok(GrindersSession {
         model_id: config.model_id.clone(),
-        kind: SessionKind::Onnx(session),
+        kind: SessionKind::Onnx(std::sync::Mutex::new(session)),
         timeout: config.timeout,
         max_tokens: config.max_tokens,
     })

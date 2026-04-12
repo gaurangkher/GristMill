@@ -14,7 +14,7 @@ async function post<T>(path: string, body?: unknown, timeoutMs = 10_000): Promis
   try {
     const res = await fetch(`${BASE}${path}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: body !== undefined ? { "Content-Type": "application/json" } : {},
       body: body !== undefined ? JSON.stringify(body) : undefined,
       signal: controller.signal,
     });
@@ -200,7 +200,7 @@ export const api = {
 
   pipelineIds: () => get<{ pipelines: string[] }>("/api/pipelines"),
   pipelineRegister: (pipeline: Record<string, unknown>) =>
-    post<{ registered: boolean; id: string }>("/api/pipelines", pipeline),
+    post<{ registered: boolean; id: string }>("/api/pipelines", pipeline, 30_000),
   pipelineRun: (id: string, payload: unknown = {}) =>
     post<{ pipelineId: string; result: unknown }>(`/api/pipelines/${id}/run`, payload, 60_000),
 

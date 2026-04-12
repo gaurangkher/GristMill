@@ -79,10 +79,14 @@ impl InferenceOutput {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Runtime-specific inner state of a session.
+///
+/// The ONNX session is wrapped in a `Mutex` because `ort::session::Session::run`
+/// requires `&mut self` in ort v2, while the session may be shared across
+/// concurrent callers via `Arc<GrindersSession>`.
 pub enum SessionKind {
     /// ONNX Runtime session.
     #[cfg(feature = "onnx")]
-    Onnx(ort::Session),
+    Onnx(std::sync::Mutex<ort::session::Session>),
 
     /// GGUF / llama.cpp context.
     #[cfg(feature = "gguf")]
@@ -150,7 +154,13 @@ impl GrindersSession {
 
         let output = match &self.kind {
             #[cfg(feature = "onnx")]
-            SessionKind::Onnx(session) => run_onnx(session, req, &self.model_id)?,
+            SessionKind::Onnx(mutex) => {
+                let mut session = mutex.lock().map_err(|_| GrindersError::OnnxInference {
+                    model_id: self.model_id.clone(),
+                    reason: "ONNX session mutex poisoned".into(),
+                })?;
+                run_onnx(&mut session, req, &self.model_id)?
+            }
 
             #[cfg(feature = "gguf")]
             SessionKind::Gguf(ctx) => run_gguf(ctx.as_ref(), req, &self.model_id, self.max_tokens)?,
@@ -190,11 +200,11 @@ impl GrindersSession {
 
 #[cfg(feature = "onnx")]
 fn run_onnx(
-    session: &ort::Session,
+    session: &mut ort::session::Session,
     req: &InferenceRequest,
     model_id: &str,
 ) -> Result<InferenceOutput, GrindersError> {
-    use ort::inputs;
+    use ort::value::TensorRef;
 
     let features = req
         .features
@@ -204,13 +214,25 @@ fn run_onnx(
             reason: "ONNX model requires feature tensor input".into(),
         })?;
 
+    // ort v2: pass (shape, &[f32]) to avoid requiring the optional `ndarray`
+    // feature on the ort crate (and the ndarray 0.16/0.17 version mismatch).
+    // inputs! returns Vec (not Result) in ort v2 — no .map_err() on that call.
+    let shape: Vec<i64> = features.shape().iter().map(|&d| d as i64).collect();
+    let data: &[f32] = features
+        .as_slice()
+        .ok_or_else(|| GrindersError::OnnxInference {
+            model_id: model_id.to_owned(),
+            reason: "feature array is not contiguous".into(),
+        })?;
+    let tensor = TensorRef::<f32>::from_array_view((shape, data)).map_err(|e| {
+        GrindersError::OnnxInference {
+            model_id: model_id.to_owned(),
+            reason: e.to_string(),
+        }
+    })?;
+
     let outputs = session
-        .run(
-            inputs!["features" => features.view()].map_err(|e| GrindersError::OnnxInference {
-                model_id: model_id.to_owned(),
-                reason: e.to_string(),
-            })?,
-        )
+        .run(ort::inputs!["features" => tensor])
         .map_err(|e| GrindersError::OnnxInference {
             model_id: model_id.to_owned(),
             reason: e.to_string(),
@@ -226,7 +248,8 @@ fn run_onnx(
                 .into(),
         })?;
 
-    let data =
+    // try_extract_tensor returns (&Shape, &[T]) in ort v2.
+    let (_, flat_data) =
         output_tensor
             .try_extract_tensor::<f32>()
             .map_err(|e| GrindersError::OnnxInference {
@@ -234,7 +257,7 @@ fn run_onnx(
                 reason: e.to_string(),
             })?;
 
-    let flat: Array1<f32> = data.iter().cloned().collect();
+    let flat: Array1<f32> = flat_data.iter().cloned().collect();
     Ok(InferenceOutput::tensor(flat, 0))
 }
 
