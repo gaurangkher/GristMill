@@ -9,10 +9,13 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import os
 from pathlib import Path
 from typing import Any, Iterator, Optional
 
 logger = logging.getLogger(__name__)
+
+_DEFAULT_LOCAL_URI = str(Path("~/.gristmill/mlruns").expanduser())
 
 
 class ExperimentTracker:
@@ -23,17 +26,27 @@ class ExperimentTracker:
 
     Args:
         experiment_name: MLflow experiment name (created if it doesn't exist).
-        tracking_uri: MLflow tracking URI.  Defaults to a local file store
-            at ``~/.gristmill/mlruns``.
+        tracking_uri: MLflow tracking URI.  Resolution order:
+
+            1. Explicit ``tracking_uri`` argument (if not ``None``).
+            2. ``MLFLOW_TRACKING_URI`` environment variable.
+            3. Local file store at ``~/.gristmill/mlruns`` (dev / standalone).
+
+            When running inside Docker with ``--profile mlflow`` the env var is
+            automatically set to ``http://mlflow:5050`` by ``docker-compose.yml``.
     """
 
     def __init__(
         self,
         experiment_name: str = "gristmill",
-        tracking_uri: str = str(Path("~/.gristmill/mlruns").expanduser()),
+        tracking_uri: Optional[str] = None,
     ) -> None:
         self.experiment_name = experiment_name
-        self.tracking_uri = tracking_uri
+        self.tracking_uri = (
+            tracking_uri
+            or os.environ.get("MLFLOW_TRACKING_URI")
+            or _DEFAULT_LOCAL_URI
+        )
         self._active_run: Optional[Any] = None
         self._mlflow: Optional[Any] = None
 
