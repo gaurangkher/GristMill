@@ -31,8 +31,13 @@ export async function pipelinesRoutes(
       },
     },
     async (req, reply) => {
-      await bridge.registerPipeline(req.body);
-      return reply.code(201).send({ registered: true, id: req.body["id"] });
+      try {
+        await bridge.registerPipeline(req.body);
+        return reply.code(201).send({ registered: true, id: req.body["id"] });
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return reply.status(503).send({ error: msg });
+      }
     },
   );
 

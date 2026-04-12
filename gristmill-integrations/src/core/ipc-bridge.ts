@@ -176,8 +176,8 @@ export class IpcBridge implements IBridge {
 
   // ── Send ───────────────────────────────────────────────────────────────────
 
-  private async send(request: unknown): Promise<unknown> {
-    const sock = await this.connect();
+  private async send(request: unknown, timeoutMs = 60_000): Promise<unknown> {
+    await this.connect();
     const id = this.nextId++;
     const encoded = Buffer.from(encode({ id, request }));
     const header = Buffer.allocUnsafe(HEADER_SIZE);
@@ -185,7 +185,41 @@ export class IpcBridge implements IBridge {
     const frame = Buffer.concat([header, encoded]);
 
     return new Promise((resolve, reject) => {
-      this.queue.push({ frame, resolve, reject });
+      let settled = false;
+
+      const wrappedResolve = (value: unknown) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(value);
+      };
+
+      const wrappedReject = (reason: Error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        reject(reason);
+      };
+
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        // If still in the queue, splice it out.
+        const idx = this.queue.findIndex((p) => p.resolve === wrappedResolve);
+        if (idx !== -1) {
+          this.queue.splice(idx, 1);
+        } else {
+          // Already inflight — destroy the socket to avoid a mismatched response
+          // being delivered to the next queued request.
+          this.socket?.destroy();
+          this.socket = null;
+          this.inflight = null;
+          this.flushQueue();
+        }
+        reject(new Error(`IPC request timed out after ${timeoutMs / 1000}s`));
+      }, timeoutMs);
+
+      this.queue.push({ frame, resolve: wrappedResolve, reject: wrappedReject });
       this.flushQueue();
     });
   }
@@ -296,7 +330,7 @@ export class IpcBridge implements IBridge {
 
   /** Retrieve routing / budget metrics from the daemon. */
   async metrics(): Promise<unknown> {
-    const result = await this.send({ method: "metrics", params: {} });
+    const result = await this.send({ method: "metrics" });
     return result;
   }
 }

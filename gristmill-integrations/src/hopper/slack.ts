@@ -19,11 +19,14 @@
  * Event mapping:
  *   Slack event type     → GristEvent channel / tags
  *   app_mention          → channel="slack", tags.slack_event_type="app_mention"
- *   message (DM)         → channel="slack", tags.slack_conv_type="direct"
- *   message (channel)    → channel="slack", tags.slack_conv_type="channel"
+ *   message (DM only)    → channel="slack", tags.slack_conv_type="direct"
  *   reaction_added       → channel="slack", tags.slack_event_type="reaction_added"
  *   member_joined_channel→ channel="slack", tags.slack_event_type="member_joined_channel"
  *   (all others)         → channel="slack", tags.slack_event_type=<raw type>
+ *
+ * Note: channel `message` events are intentionally ignored — an @mention in a
+ * channel fires both `app_mention` AND `message`; handling both would produce
+ * duplicate replies.  Use `app_mention` for channel interactions.
  *
  * Reply behaviour:
  *   After triage, if the RouteDecision carries a `response` string in its
@@ -88,12 +91,20 @@ export class SlackHopper {
       await this._handleEvent(event as SlackMessageEvent);
     });
 
-    // message: DMs and channel messages (bot must be invited to the channel)
+    // message: DMs only.
+    //
+    // Channel messages where the bot is @mentioned fire BOTH an `app_mention`
+    // event (handled above) AND a `message` event.  Processing both would post
+    // two identical replies for every mention.  The `message` handler is
+    // therefore restricted to direct messages (channel_type === "im"), which
+    // never produce an `app_mention` event.
     this.client.on("message", async ({ event, ack }) => {
       await ack();
-      // Ignore bot messages to prevent reply loops
       const msg = event as SlackMessageEvent;
+      // Ignore bot messages to prevent reply loops.
       if (msg.bot_id || msg.subtype === "bot_message") return;
+      // Only process DMs — channel @mentions are handled by app_mention above.
+      if (msg.channel_type !== "im") return;
       await this._handleEvent(msg);
     });
 

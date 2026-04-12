@@ -116,6 +116,11 @@ impl Default for AnthropicConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OllamaConfig {
+    /// Set to `false` to skip Ollama entirely and go straight to Anthropic.
+    /// Useful when Ollama is not installed or not running locally.
+    /// Defaults to `true` so existing deployments are unaffected.
+    #[serde(default = "default_ollama_enabled")]
+    pub enabled: bool,
     /// Base URL of the running Ollama instance.
     #[serde(default = "default_ollama_base_url")]
     pub base_url: String,
@@ -124,6 +129,9 @@ pub struct OllamaConfig {
     pub model: String,
 }
 
+fn default_ollama_enabled() -> bool {
+    true
+}
 fn default_ollama_base_url() -> String {
     "http://localhost:11434".into()
 }
@@ -134,6 +142,7 @@ fn default_ollama_model() -> String {
 impl Default for OllamaConfig {
     fn default() -> Self {
         Self {
+            enabled: default_ollama_enabled(),
             base_url: default_ollama_base_url(),
             model: default_ollama_model(),
         }

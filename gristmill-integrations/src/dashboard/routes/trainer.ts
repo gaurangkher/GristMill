@@ -35,7 +35,6 @@ export async function trainerRoutes(
       const res = await fetch(`${TRAINER_BASE}${trainerPath}`, {
         method,
         signal: controller.signal,
-        headers: { "Content-Type": "application/json" },
       });
       return await res.json();
     } catch (err: unknown) {

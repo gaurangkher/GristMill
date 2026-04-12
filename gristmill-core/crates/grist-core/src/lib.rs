@@ -511,6 +511,7 @@ fn build_hammer_config(cfg: &GristMillConfig) -> HammerConfig {
                 base_url: cfg.hammer.providers.anthropic.base_url.clone(),
             },
             ollama: OllamaConfig {
+                enabled: cfg.hammer.providers.ollama.enabled,
                 base_url: cfg.hammer.providers.ollama.base_url.clone(),
                 model: cfg.hammer.providers.ollama.model.clone(),
             },
