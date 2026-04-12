@@ -55,7 +55,8 @@ pub struct Hammer {
     /// leader has populated the cache) subscribes here instead of issuing a
     /// second provider call.  This prevents duplicate requests to Anthropic/Ollama
     /// when two identical prompts arrive concurrently.
-    inflight: Arc<Mutex<HashMap<String, Vec<oneshot::Sender<Result<EscalationResponse, HammerError>>>>>>,
+    inflight:
+        Arc<Mutex<HashMap<String, Vec<oneshot::Sender<Result<EscalationResponse, HammerError>>>>>>,
 }
 
 impl Hammer {
@@ -432,21 +433,36 @@ mod tests {
             count: Arc<AtomicUsize>,
         }
         impl ProviderFn for CountingProvider {
-            fn call(&self, req: &EscalationRequest) -> Result<(String, u32, Provider), HammerError> {
+            fn call(
+                &self,
+                req: &EscalationRequest,
+            ) -> Result<(String, u32, Provider), HammerError> {
                 self.count.fetch_add(1, Ordering::SeqCst);
                 // Small artificial delay so the second request arrives while the
                 // first is still in-flight (simulated by the batcher window).
-                Ok((format!("response:{}", req.prompt), 10, Provider::AnthropicPrimary))
+                Ok((
+                    format!("response:{}", req.prompt),
+                    10,
+                    Provider::AnthropicPrimary,
+                ))
             }
         }
 
         let config = HammerConfig {
-            batch: BatchConfig { enabled: true, window_ms: 200, max_batch_size: 10 },
+            batch: BatchConfig {
+                enabled: true,
+                window_ms: 200,
+                max_batch_size: 10,
+            },
             ..Default::default()
         };
-        let providers: Vec<Arc<dyn ProviderFn>> =
-            vec![Arc::new(CountingProvider { count: Arc::clone(&call_count) })];
-        let router = Arc::new(RequestRouter::with_mock_providers(config.clone(), providers));
+        let providers: Vec<Arc<dyn ProviderFn>> = vec![Arc::new(CountingProvider {
+            count: Arc::clone(&call_count),
+        })];
+        let router = Arc::new(RequestRouter::with_mock_providers(
+            config.clone(),
+            providers,
+        ));
         let batcher = RequestBatcher::new(config.batch.clone(), Arc::clone(&router));
         let hammer = Arc::new(Hammer {
             budget: BudgetManager::new(config.budget.clone()),
@@ -467,8 +483,11 @@ mod tests {
         assert!(r1.unwrap().is_ok());
         assert!(r2.unwrap().is_ok());
         // Provider must have been called exactly once despite two concurrent requests.
-        assert_eq!(call_count.load(Ordering::SeqCst), 1,
+        assert_eq!(
+            call_count.load(Ordering::SeqCst),
+            1,
             "singleflight should deduplicate: provider called {} times instead of 1",
-            call_count.load(Ordering::SeqCst));
+            call_count.load(Ordering::SeqCst)
+        );
     }
 }

@@ -76,7 +76,7 @@ fn load_onnx_real(config: &ModelConfig) -> Result<GrindersSession, GrindersError
         "loading ONNX model",
     );
 
-    let session = ort::Session::builder()
+    let session = ort::session::Session::builder()
         .map_err(|e| GrindersError::ModelLoadFailed {
             model_id: config.model_id.clone(),
             reason: e.to_string(),
@@ -92,7 +92,7 @@ fn load_onnx_real(config: &ModelConfig) -> Result<GrindersSession, GrindersError
 
     Ok(GrindersSession {
         model_id: config.model_id.clone(),
-        kind: SessionKind::Onnx(session),
+        kind: SessionKind::Onnx(std::sync::Mutex::new(session)),
         timeout: config.timeout,
         max_tokens: config.max_tokens,
     })

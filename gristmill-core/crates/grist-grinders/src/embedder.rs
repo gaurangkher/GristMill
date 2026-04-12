@@ -99,9 +99,7 @@ pub fn zero_embedder() -> EmbedderSession {
 fn build_onnx_embedder(
     cfg: &crate::config::ModelConfig,
 ) -> Result<EmbedderSession, crate::error::GrindersError> {
-    use ort::Session;
-
-    let session = Session::builder()
+    let session = ort::session::Session::builder()
         .map_err(|e| crate::error::GrindersError::ModelLoadFailed {
             model_id: "minilm-l6-v2".into(),
             reason: e.to_string(),
@@ -112,8 +110,9 @@ fn build_onnx_embedder(
             reason: e.to_string(),
         })?;
 
-    // Wrap in Arc so we can move into the closure without copying.
-    let session = Arc::new(session);
+    // Wrap in Arc<Mutex> so the closure can call session.run() which requires
+    // &mut self in ort v2, while still being shared across concurrent callers.
+    let session = Arc::new(std::sync::Mutex::new(session));
 
     tracing::info!(path = %cfg.path.display(), "MiniLM embedder loaded");
     metrics::counter!("grinders.embedder.loads").increment(1);
@@ -126,26 +125,53 @@ fn build_onnx_embedder(
 /// Run one MiniLM embedding inference call.
 #[cfg(feature = "onnx")]
 #[instrument(level = "trace", skip(session))]
-fn embed_with_session(session: &ort::Session, text: &str) -> Result<Array1<f32>, SieveError> {
-    use ort::inputs;
+fn embed_with_session(
+    session: &std::sync::Mutex<ort::session::Session>,
+    text: &str,
+) -> Result<Array1<f32>, SieveError> {
+    use ort::value::TensorRef;
 
     let (input_ids, attention_mask, token_type_ids) = tokenize_for_minilm(text, MINILM_MAX_LEN);
 
-    // Run the ONNX session.
-    let outputs = session
-        .run(
-            inputs![
-                "input_ids"      => input_ids.view(),
-                "attention_mask" => attention_mask.view(),
-                "token_type_ids" => token_type_ids.view(),
-            ]
-            .map_err(|e| SieveError::FeatureExtraction(e.to_string()))?,
-        )
+    // ort v2: pass (shape, &[i64]) tuples — avoids the optional ndarray feature
+    // on ort and the ndarray 0.16/0.17 version mismatch.
+    // inputs! returns Vec (not Result) in ort v2.
+    let ids_shape: Vec<i64> = input_ids.shape().iter().map(|&d| d as i64).collect();
+    let ids_data = input_ids
+        .as_slice()
+        .ok_or_else(|| SieveError::FeatureExtraction("input_ids not contiguous".into()))?;
+    let mask_shape: Vec<i64> = attention_mask.shape().iter().map(|&d| d as i64).collect();
+    let mask_data = attention_mask
+        .as_slice()
+        .ok_or_else(|| SieveError::FeatureExtraction("attention_mask not contiguous".into()))?;
+    let type_shape: Vec<i64> = token_type_ids.shape().iter().map(|&d| d as i64).collect();
+    let type_data = token_type_ids
+        .as_slice()
+        .ok_or_else(|| SieveError::FeatureExtraction("token_type_ids not contiguous".into()))?;
+
+    let t_ids = TensorRef::<i64>::from_array_view((ids_shape, ids_data))
+        .map_err(|e| SieveError::FeatureExtraction(e.to_string()))?;
+    let t_mask = TensorRef::<i64>::from_array_view((mask_shape, mask_data))
+        .map_err(|e| SieveError::FeatureExtraction(e.to_string()))?;
+    let t_types = TensorRef::<i64>::from_array_view((type_shape, type_data))
+        .map_err(|e| SieveError::FeatureExtraction(e.to_string()))?;
+
+    let mut sess = session
+        .lock()
+        .map_err(|_| SieveError::FeatureExtraction("MiniLM session mutex poisoned".into()))?;
+
+    let outputs = sess
+        .run(ort::inputs![
+            "input_ids"      => t_ids,
+            "attention_mask" => t_mask,
+            "token_type_ids" => t_types,
+        ])
         .map_err(|e| SieveError::FeatureExtraction(e.to_string()))?;
 
     // MiniLM outputs "last_hidden_state" [1, seq_len, 384].
     // We mean-pool over the sequence dimension to get [384].
-    let hidden = outputs
+    // try_extract_tensor returns (&Shape, &[f32]) in ort v2.
+    let (hidden_shape, hidden_data) = outputs
         .get("last_hidden_state")
         .ok_or_else(|| {
             SieveError::FeatureExtraction("MiniLM output 'last_hidden_state' not found".into())
@@ -153,18 +179,19 @@ fn embed_with_session(session: &ort::Session, text: &str) -> Result<Array1<f32>,
         .try_extract_tensor::<f32>()
         .map_err(|e| SieveError::FeatureExtraction(e.to_string()))?;
 
-    // Shape: [1, seq_len, 384].  Mean-pool over seq_len dimension.
-    let shape = hidden.shape().to_vec();
-    if shape.len() < 3 || shape[2] != EMBEDDING_DIM {
+    // Shape: [1, seq_len, 384] as Vec<i64>.
+    if hidden_shape.len() < 3 || hidden_shape[2] as usize != EMBEDDING_DIM {
         return Err(SieveError::FeatureExtraction(format!(
-            "unexpected MiniLM output shape: {shape:?}"
+            "unexpected MiniLM output shape: {hidden_shape:?}"
         )));
     }
-    let seq_len = shape[1];
+    let seq_len = hidden_shape[1] as usize;
+
+    // Mean-pool: flat index [batch=0, seq_idx, dim] = seq_idx * EMBEDDING_DIM + dim
     let mut embedding = Array1::<f32>::zeros(EMBEDDING_DIM);
     for seq_idx in 0..seq_len {
         for dim in 0..EMBEDDING_DIM {
-            embedding[dim] += hidden[[0, seq_idx, dim]];
+            embedding[dim] += hidden_data[seq_idx * EMBEDDING_DIM + dim];
         }
     }
     embedding.mapv_inplace(|x| x / seq_len as f32);

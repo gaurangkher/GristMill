@@ -104,10 +104,14 @@ impl ClassifierOutput {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Inner state held behind the ArcSwap — swapped atomically on hot-reload.
+///
+/// The `Session` is wrapped in a `Mutex` because `ort::session::Session::run`
+/// requires `&mut self` in ort v2, while `ArcSwap::load()` only provides shared
+/// (`&`) access.
 enum ClassifierInner {
     /// Live ONNX session.
     #[cfg(feature = "onnx")]
-    Onnx(ort::Session),
+    Onnx(std::sync::Mutex<ort::session::Session>),
     /// Heuristic fallback (no model file present).
     Heuristic,
 }
@@ -160,11 +164,11 @@ impl Classifier {
         if let Some(path) = model_path {
             if path.exists() {
                 info!(path = %path.display(), "loading ONNX classifier");
-                let session = ort::Session::builder()
+                let session = ort::session::Session::builder()
                     .map_err(|e| SieveError::ModelLoad(e.to_string()))?
                     .commit_from_file(path)
                     .map_err(|e| SieveError::ModelLoad(e.to_string()))?;
-                return Ok(ClassifierInner::Onnx(session));
+                return Ok(ClassifierInner::Onnx(std::sync::Mutex::new(session)));
             }
         }
 
@@ -180,7 +184,12 @@ impl Classifier {
         let guard = self.inner.load();
         match guard.as_ref() {
             #[cfg(feature = "onnx")]
-            ClassifierInner::Onnx(session) => self.classify_onnx(session, features),
+            ClassifierInner::Onnx(mutex) => {
+                let mut session = mutex
+                    .lock()
+                    .map_err(|_| SieveError::Inference("session mutex poisoned".into()))?;
+                self.classify_onnx(&mut session, features)
+            }
             ClassifierInner::Heuristic => Ok(self.classify_heuristic(features)),
         }
     }
@@ -201,26 +210,30 @@ impl Classifier {
     #[cfg(feature = "onnx")]
     fn classify_onnx(
         &self,
-        session: &ort::Session,
+        session: &mut ort::session::Session,
         features: &FeatureVector,
     ) -> Result<ClassifierOutput, SieveError> {
-        use ort::inputs;
+        use ort::value::TensorRef;
 
         let batch: Array2<f32> = features.as_batch();
+        // Build a (shape, &[f32]) tuple — compatible with ort v2 without requiring
+        // the optional `ndarray` feature on the ort crate (and avoiding the
+        // ndarray 0.16 vs 0.17 version mismatch).  inputs! returns Vec (not
+        // Result) in ort v2, so no .map_err() is needed on that call.
+        let shape: Vec<i64> = batch.shape().iter().map(|&d| d as i64).collect();
+        let data: &[f32] = batch
+            .as_slice()
+            .ok_or_else(|| SieveError::Inference("batch array is not contiguous".into()))?;
+        let tensor = TensorRef::<f32>::from_array_view((shape, data))
+            .map_err(|e| SieveError::Inference(e.to_string()))?;
         let outputs = session
-            .run(
-                inputs!["features" => batch.view()]
-                    .map_err(|e| SieveError::Inference(e.to_string()))?,
-            )
+            .run(ort::inputs!["features" => tensor])
             .map_err(|e| SieveError::Inference(e.to_string()))?;
 
-        let logits = outputs["logits"]
+        // try_extract_tensor returns (&Shape, &[T]) in ort v2.
+        let (_shape, logit_slice) = outputs["logits"]
             .try_extract_tensor::<f32>()
             .map_err(|e| SieveError::Inference(e.to_string()))?;
-
-        let logit_slice = logits
-            .as_slice()
-            .ok_or_else(|| SieveError::Inference("failed to get contiguous logit slice".into()))?;
 
         Ok(ClassifierOutput::from_logits(logit_slice))
     }

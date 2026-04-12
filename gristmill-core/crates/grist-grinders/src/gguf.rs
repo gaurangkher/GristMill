@@ -145,8 +145,10 @@ impl crate::session::GgufContext for LlamaCppCtx {
                 reason: e.to_string(),
             })?;
 
-        for token in completions.take(max_tokens) {
-            output.push_str(&token);
+        // into_strings() decodes each Token to a UTF-8 String fragment,
+        // correctly handling multi-token codepoints (e.g. emojis).
+        for token_str in completions.into_strings().take(max_tokens) {
+            output.push_str(&token_str);
         }
 
         metrics::counter!("grinders.gguf.completions").increment(1);
