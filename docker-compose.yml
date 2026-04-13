@@ -86,6 +86,8 @@ services:
       GRISTMILL_SOCK: /data/gristmill/gristmill.sock
       # When running --profile trainer, proxy requests to the trainer container
       TRAINER_URL: "http://trainer:7432"
+      # Use the Docker service name — "localhost" inside this container is not Ollama
+      GRISTMILL_HAMMER_OLLAMA_BASE_URL: "http://ollama:11434"
     healthcheck:
       test:
         - CMD
