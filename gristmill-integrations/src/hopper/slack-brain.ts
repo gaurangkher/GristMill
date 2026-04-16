@@ -227,7 +227,7 @@ export class SecondBrainHandler {
       };
     }
 
-    const topScore = results[0].score;
+    const topScore = results[0]!.score;
 
     if (topScore >= this.confidenceThreshold) {
       // ── Inline reply from top results ─────────────────────────────────────
@@ -269,7 +269,7 @@ export class SecondBrainHandler {
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       // Fall back to inline reply if escalation fails.
-      const fallback = results[0].memory.content.slice(0, this.snippetLength);
+      const fallback = results[0]!.memory.content.slice(0, this.snippetLength);
       return {
         replyText:
           `_GristMill:_ (LLM unavailable — ${msg})\n\nTop note: ${fallback}`,

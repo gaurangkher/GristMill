@@ -38,7 +38,6 @@ Configuration is via environment variables or explicit constructor args.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import math
 import os
