@@ -2,6 +2,8 @@ export { HttpHopper, WebSocketHopper } from "./http.js";
 export type { HopperConfig, AdapterHandler } from "./http.js";
 export { SlackHopper } from "./slack.js";
 export type { SlackHopperConfig } from "./slack.js";
+export { SecondBrainHandler } from "./slack-brain.js";
+export type { SecondBrainConfig, CaptureResult, QueryResult } from "./slack-brain.js";
 export { WebhookHopper } from "./webhook.js";
 export type { WebhookHopperConfig, WebhookChannelConfig } from "./webhook.js";
 export { CronHopper } from "./cron.js";

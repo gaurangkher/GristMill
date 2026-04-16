@@ -43,9 +43,7 @@ class ExperimentTracker:
     ) -> None:
         self.experiment_name = experiment_name
         self.tracking_uri = (
-            tracking_uri
-            or os.environ.get("MLFLOW_TRACKING_URI")
-            or _DEFAULT_LOCAL_URI
+            tracking_uri or os.environ.get("MLFLOW_TRACKING_URI") or _DEFAULT_LOCAL_URI
         )
         self._active_run: Optional[Any] = None
         self._mlflow: Optional[Any] = None

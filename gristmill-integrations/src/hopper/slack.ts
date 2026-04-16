@@ -32,11 +32,21 @@
  *   After triage, if the RouteDecision carries a `response` string in its
  *   metadata, SlackHopper posts it back to the originating channel/thread
  *   via WebClient.chat.postMessage.
+ *
+ * Second Brain mode:
+ *   When `config.secondBrain` is set, the hopper activates Second Brain mode:
+ *     - /save <url>:  fetch URL → store as bookmark
+ *     - /save <text>: store text note directly
+ *     - /ask <query>: vector search warm tier → inline reply or LLM
+ *     - 📌 reaction:  bookmark the reacted message
+ *   Plain DMs (no slash-command prefix) pass through to normal triage.
+ *   Only explicit /save commands capture content.
  */
 
 import { SocketModeClient } from "@slack/socket-mode";
 import { WebClient, type ChatPostMessageArguments } from "@slack/web-api";
 import type { IBridge, GristEventInit, RouteDecision, EscalationResult } from "../core/bridge.js";
+import { SecondBrainHandler, type SecondBrainConfig } from "./slack-brain.js";
 
 // ── Config ─────────────────────────────────────────────────────────────────────
 
@@ -51,6 +61,12 @@ export interface SlackHopperConfig {
    * - "off"               — do not auto-reply
    */
   replyMode?: "thread" | "off";
+  /**
+   * When provided, activates Second Brain mode.
+   * DMs are captured as notes; /save and /ask commands are handled locally;
+   * 📌 reactions bookmark messages; thread replies create linked notes.
+   */
+  secondBrain?: SecondBrainConfig;
 }
 
 // ── SlackHopper ───────────────────────────────────────────────────────────────
@@ -59,6 +75,7 @@ export class SlackHopper {
   private client: SocketModeClient;
   private web: WebClient;
   private replyMode: "thread" | "off";
+  private brain: SecondBrainHandler | null;
 
   constructor(
     private readonly bridge: IBridge,
@@ -67,6 +84,9 @@ export class SlackHopper {
     this.client = new SocketModeClient({ appToken: config.appToken });
     this.web = new WebClient(config.botToken);
     this.replyMode = config.replyMode ?? "thread";
+    this.brain = config.secondBrain
+      ? new SecondBrainHandler(bridge, this.web, config.secondBrain)
+      : null;
   }
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────
@@ -74,7 +94,9 @@ export class SlackHopper {
   async start(): Promise<void> {
     this._registerHandlers();
     await this.client.start();
-    console.log("[SlackHopper] Connected via Socket Mode");
+    console.log(
+      `[SlackHopper] Connected via Socket Mode${this.brain ? " (Second Brain mode active)" : ""}`,
+    );
   }
 
   async stop(): Promise<void> {
@@ -111,7 +133,7 @@ export class SlackHopper {
     // reaction_added / reaction_removed
     this.client.on("reaction_added", async ({ event, ack }) => {
       await ack();
-      await this._handleGenericEvent(event, "reaction_added");
+      await this._handleReactionAdded(event as SlackReactionEvent);
     });
 
     this.client.on("reaction_removed", async ({ event, ack }) => {
@@ -129,6 +151,28 @@ export class SlackHopper {
   // ── Core processing ────────────────────────────────────────────────────────
 
   private async _handleEvent(event: SlackMessageEvent): Promise<void> {
+    const text = String(event.text ?? "").trim();
+
+    // ── Second Brain command interception ─────────────────────────────────
+    if (this.brain && event.channel) {
+      // /save <url|text> — bookmark a URL or store a text note
+      if (text.startsWith("/save ")) {
+        const arg = text.slice(6).trim();
+        await this._handleSave(event, arg);
+        return;
+      }
+
+      // /ask <query> — query warm-tier notes
+      if (text.startsWith("/ask ")) {
+        const query = text.slice(5).trim();
+        await this._handleAsk(event, query);
+        return;
+      }
+
+      // Plain DMs (no /save or /ask prefix) fall through to normal triage.
+    }
+
+    // ── Normal triage path ────────────────────────────────────────────────
     const convType = _convType(event.channel_type);
     const gristEvent: GristEventInit = {
       channel: "slack",
@@ -174,6 +218,100 @@ export class SlackHopper {
     } catch (err) {
       console.error(`[SlackHopper] triage error (${type}):`, err);
     }
+  }
+
+  // ── Second Brain handlers ──────────────────────────────────────────────────
+
+  /**
+   * /save <arg> — bookmark a URL or store a text note.
+   *
+   * If `arg` parses as an absolute http(s) URL, fetch the page and store it
+   * as a bookmark.  Otherwise treat the argument as plain text and store it
+   * as a capture note.
+   */
+  private async _handleSave(event: SlackMessageEvent, arg: string): Promise<void> {
+    if (!this.brain || !event.channel) return;
+    if (!arg) {
+      await this._postMessage(event, "_GristMill:_ Usage: `/save <url or text>`");
+      return;
+    }
+
+    const isUrl = _looksLikeUrl(arg);
+
+    if (isUrl) {
+      await this._postMessage(event, `_GristMill:_ Fetching \`${arg}\`…`);
+      try {
+        const result = await this.brain.saveUrl(arg, event.ts);
+        console.log(`[SlackHopper] Second Brain: saved URL id=${result.memoryId} url=${arg}`);
+        await this._postMessage(
+          event,
+          `_GristMill:_ Bookmarked \`${arg}\` ✓ (\`${result.memoryId.slice(0, 8)}…\`)`,
+        );
+      } catch (err) {
+        console.error("[SlackHopper] Second Brain: saveUrl error:", err);
+        await this._postMessage(event, `_GristMill:_ Failed to save URL: ${String(err)}`);
+      }
+    } else {
+      try {
+        const result = await this.brain.captureNote(arg, event.ts);
+        console.log(`[SlackHopper] Second Brain: captured note id=${result.memoryId}`);
+        await this._postMessage(event, `_GristMill:_ Saved. ✓ (\`${result.memoryId.slice(0, 8)}…\`)`);
+      } catch (err) {
+        console.error("[SlackHopper] Second Brain: capture error:", err);
+        await this._postMessage(event, `_GristMill:_ Failed to save note: ${String(err)}`);
+      }
+    }
+  }
+
+  /**
+   * /ask <query> → recall + optional LLM → reply.
+   */
+  private async _handleAsk(event: SlackMessageEvent, query: string): Promise<void> {
+    if (!this.brain || !event.channel) return;
+    if (!query) {
+      await this._postMessage(event, "_GristMill:_ Usage: `/ask <your question>`");
+      return;
+    }
+
+    try {
+      const result = await this.brain.queryNotes(query);
+      console.log(
+        `[SlackHopper] Second Brain: query="${query}" sources=${result.sourceCount} llm=${result.usedLlm}`,
+      );
+      await this._postMessage(event, result.replyText);
+    } catch (err) {
+      console.error("[SlackHopper] Second Brain: ask error:", err);
+      await this._postMessage(event, `_GristMill:_ Query failed: ${String(err)}`);
+    }
+  }
+
+  /**
+   * reaction_added handler — if emoji is 📌 (pushpin) and Second Brain mode
+   * is active, bookmark the reacted message.
+   */
+  private async _handleReactionAdded(event: SlackReactionEvent): Promise<void> {
+    if (this.brain && event.reaction === "pushpin" && event.item?.channel && event.item?.ts) {
+      const channel = String(event.item.channel);
+      const ts = String(event.item.ts);
+      try {
+        const result = await this.brain.bookmarkMessage(channel, ts);
+        if (result) {
+          console.log(`[SlackHopper] Second Brain: bookmarked message id=${result.memoryId}`);
+          // Post a confirmation to the channel where the reaction was added
+          await this.web.chat.postMessage({
+            channel,
+            thread_ts: ts,
+            text: `_GristMill:_ Bookmarked ✓ (\`${result.memoryId.slice(0, 8)}…\`)`,
+          });
+        }
+      } catch (err) {
+        console.error("[SlackHopper] Second Brain: bookmark error:", err);
+      }
+      return;
+    }
+
+    // Fall through to normal triage for non-pushpin reactions.
+    await this._handleGenericEvent(event, "reaction_added");
   }
 
   // ── Reply ──────────────────────────────────────────────────────────────────
@@ -264,6 +402,30 @@ interface SlackMessageEvent {
   bot_id?: string;
   subtype?: string;
   [key: string]: unknown;
+}
+
+interface SlackReactionEvent {
+  reaction?: string;
+  item?: {
+    type?: string;
+    channel?: string;
+    ts?: string;
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
+}
+
+/**
+ * Return true if `s` looks like an absolute http(s) URL.
+ * Uses the URL constructor rather than a regex to avoid false positives.
+ */
+function _looksLikeUrl(s: string): boolean {
+  try {
+    const u = new URL(s);
+    return u.protocol === "http:" || u.protocol === "https:";
+  } catch {
+    return false;
+  }
 }
 
 function _convType(channelType?: string): string {
