@@ -76,21 +76,17 @@ class ProcessorConfig:
         conflict_sim_threshold: float = 0.85,
         notification_channel: str = "second_brain",
     ) -> None:
-        self.gristmill_base_url: str = (
-            gristmill_base_url
-            or os.environ.get("GRISTMILL_BASE_URL", "http://127.0.0.1:3000")
+        self.gristmill_base_url: str = gristmill_base_url or os.environ.get(
+            "GRISTMILL_BASE_URL", "http://127.0.0.1:3000"
         )
-        self.ollama_base_url: str = (
-            ollama_base_url
-            or os.environ.get("OLLAMA_HOST", "http://localhost:11434")
+        self.ollama_base_url: str = ollama_base_url or os.environ.get(
+            "OLLAMA_HOST", "http://localhost:11434"
         )
-        self.embed_model: str = (
-            embed_model
-            or os.environ.get("SECOND_BRAIN_EMBED_MODEL", "nomic-embed-text")
+        self.embed_model: str = embed_model or os.environ.get(
+            "SECOND_BRAIN_EMBED_MODEL", "nomic-embed-text"
         )
-        self.summarise_model: str = (
-            summarise_model
-            or os.environ.get("SECOND_BRAIN_SUMMARISE_MODEL", "llama3.1:8b")
+        self.summarise_model: str = summarise_model or os.environ.get(
+            "SECOND_BRAIN_SUMMARISE_MODEL", "llama3.1:8b"
         )
         self.recall_limit: int = recall_limit
         self.cluster_min_size: int = cluster_min_size
@@ -143,9 +139,7 @@ class SecondBrainProcessor:
 
     async def run_loop(self, interval_secs: float = 900) -> None:
         """Run processing passes indefinitely, sleeping ``interval_secs`` between runs."""
-        logger.info(
-            "[SecondBrainProcessor] Starting loop (interval=%.0fs)", interval_secs
-        )
+        logger.info("[SecondBrainProcessor] Starting loop (interval=%.0fs)", interval_secs)
         while True:
             try:
                 await self.run_once()
@@ -155,9 +149,7 @@ class SecondBrainProcessor:
 
     # ── Note processing ────────────────────────────────────────────────────────
 
-    async def _process_note(
-        self, note: SecondBrainNote, all_notes: list[SecondBrainNote]
-    ) -> None:
+    async def _process_note(self, note: SecondBrainNote, all_notes: list[SecondBrainNote]) -> None:
         """Enrich a single note: embed → summarise → backlinks → conflict check."""
         changed = False
 
@@ -190,10 +182,7 @@ class SecondBrainProcessor:
                 if not other.has_embedding():
                     continue
                 sim = _cosine_similarity(note.embedding, other.embedding)
-                if (
-                    sim >= self.cfg.backlink_sim_threshold
-                    and other.id not in note.backlinks
-                ):
+                if sim >= self.cfg.backlink_sim_threshold and other.id not in note.backlinks:
                     note.backlinks.append(other.id)
                     changed = True
 
@@ -271,8 +260,7 @@ class SecondBrainProcessor:
                     "topic_hint": topic,
                     "note_ids": [n.id for n in cluster],
                     "message": (
-                        f"You have {len(cluster)} notes on \"{topic}\" — "
-                        "want to synthesise?"
+                        f'You have {len(cluster)} notes on "{topic}" — want to synthesise?'
                     ),
                 },
                 priority="normal",
@@ -317,7 +305,10 @@ class SecondBrainProcessor:
                 data: dict[str, Any] = resp.json()
                 return data.get("embedding", [])
         except Exception:
-            logger.warning("[SecondBrainProcessor] Embedding failed for note (truncated to 40 chars): %.40s", text)
+            logger.warning(
+                "[SecondBrainProcessor] Embedding failed for note (truncated to 40 chars): %.40s",
+                text,
+            )
             return []
 
     async def _summarise(self, content: str) -> str:
@@ -411,9 +402,7 @@ class SecondBrainProcessor:
                     str(data.get("id", "?"))[:8],
                 )
         except Exception:
-            logger.warning(
-                "[SecondBrainProcessor] Failed to store enriched note %s", note.id[:8]
-            )
+            logger.warning("[SecondBrainProcessor] Failed to store enriched note %s", note.id[:8])
 
     async def _emit_event(
         self,
@@ -440,9 +429,7 @@ class SecondBrainProcessor:
                 resp = await client.post(url, json=body)
                 resp.raise_for_status()
         except Exception:
-            logger.warning(
-                "[SecondBrainProcessor] Failed to emit event action=%s", action
-            )
+            logger.warning("[SecondBrainProcessor] Failed to emit event action=%s", action)
 
 
 # ── Math helpers ───────────────────────────────────────────────────────────────

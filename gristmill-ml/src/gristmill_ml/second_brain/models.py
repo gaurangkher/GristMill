@@ -27,15 +27,11 @@ class SecondBrainNote(BaseModel):
 
     # ── Identity ──────────────────────────────────────────────────────────────
 
-    id: str = Field(
-        description="ULID assigned by grist-ledger when the note was captured."
-    )
+    id: str = Field(description="ULID assigned by grist-ledger when the note was captured.")
 
     # ── Content ───────────────────────────────────────────────────────────────
 
-    content: str = Field(
-        description="Raw text content as stored in the ledger."
-    )
+    content: str = Field(description="Raw text content as stored in the ledger.")
     summary: str = Field(
         default="",
         description=(
@@ -135,7 +131,9 @@ class SecondBrainNote(BaseModel):
     # ── Convenience helpers ───────────────────────────────────────────────────
 
     @classmethod
-    def from_ledger_tags(cls, id: str, content: str, tags: list[str], **kwargs) -> "SecondBrainNote":
+    def from_ledger_tags(
+        cls, id: str, content: str, tags: list[str], **kwargs
+    ) -> "SecondBrainNote":
         """
         Hydrate a SecondBrainNote from a grist-ledger Memory's id, content, and
         tag list.
@@ -152,9 +150,9 @@ class SecondBrainNote(BaseModel):
 
         for tag in tags:
             if tag.startswith("slack_ts:"):
-                slack_ts = tag[len("slack_ts:"):]
+                slack_ts = tag[len("slack_ts:") :]
             elif tag.startswith("second_brain_source:"):
-                source = tag[len("second_brain_source:"):]
+                source = tag[len("second_brain_source:") :]
 
         # Fallback: infer source from coarser tags
         if source == "unknown":
