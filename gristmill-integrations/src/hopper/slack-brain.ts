@@ -2,19 +2,20 @@
  * SecondBrainHandler — Slack interaction layer for Second Brain mode.
  *
  * Handles all second-brain specific Slack interactions:
- *   - DM capture: raw text → hot sled tagged "capture"
- *   - /save <url>: fetch URL content + store tagged "bookmark"
+ *   - /save <url>:  fetch URL content → store tagged "bookmark"
+ *   - /save <text>: store text note tagged "capture"
  *   - /ask <query>: vector search warm tier → reply inline, or LLM with context
  *   - 📌 (pushpin) reaction: fetch original message → store tagged "bookmark"
- *   - Thread reply to bot message: linked note with backref to parent memory id
+ *
+ * Plain DMs with no slash-command prefix are NOT captured; they pass through
+ * to the normal triage path so GristMill still processes them as events.
  *
  * Storage convention:
  *   All notes are stored via bridge.remember() with at least the tags:
  *     ["second_brain", <source_tag>]
  *   where <source_tag> is one of:
- *     "capture"   — plain DM text
- *     "bookmark"  — /save URL or 📌 reaction
- *     "linked"    — thread reply linked to a parent note
+ *     "capture"   — /save <text> note
+ *     "bookmark"  — /save <url> or 📌 reaction
  *
  * /ask query flow:
  *   bridge.recall(query, limit) → max score ≥ confidenceThreshold?
@@ -90,25 +91,20 @@ export class SecondBrainHandler {
   // ── Capture ────────────────────────────────────────────────────────────────
 
   /**
-   * Store a plain-text note (DM or forwarded message) in the hot sled.
+   * Store a plain-text note in the hot sled.
    *
+   * Called when the user runs `/save <text>` (non-URL argument).
    * Tags: ["second_brain", "capture"]
-   * If parentMemoryId is provided, also adds "linked" tag and appends
-   * the parent id to the content so the Python processor can build backlinks.
    */
   async captureNote(
     text: string,
     slackTs?: string,
-    parentMemoryId?: string,
   ): Promise<CaptureResult> {
-    const source = parentMemoryId ? "linked" : "capture";
+    const source = "capture";
     const tags = ["second_brain", source];
     if (slackTs) tags.push(`slack_ts:${slackTs}`);
 
-    let content = text.trim();
-    if (parentMemoryId) {
-      content += `\n\n[backlink:${parentMemoryId}]`;
-    }
+    const content = text.trim();
 
     const memoryId = await this.bridge.remember(content, tags);
 
@@ -279,35 +275,6 @@ export class SecondBrainHandler {
     }
   }
 
-  // ── Thread-parent lookup ───────────────────────────────────────────────────
-
-  /**
-   * Attempt to find the memory id associated with a bot reply at `parentTs`.
-   *
-   * The hot sled only stores the ULID id, not the slack_ts in a queryable
-   * index.  We do a best-effort recall search using the parent message text
-   * and return the closest matching memory id, or null if none is found.
-   *
-   * This is used when the user replies in a thread to a bot message so that
-   * their reply can carry a backlink to the original captured note.
-   */
-  async findParentMemoryId(channel: string, parentTs: string): Promise<string | null> {
-    try {
-      const result = await this.web.conversations.replies({
-        channel,
-        ts: parentTs,
-        limit: 1,
-        inclusive: true,
-      });
-      const parentText = result.messages?.[0]?.text;
-      if (!parentText) return null;
-
-      const recalls = await this.bridge.recall(String(parentText).slice(0, 200), 1);
-      return recalls[0]?.memory.id ?? null;
-    } catch {
-      return null;
-    }
-  }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

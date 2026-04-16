@@ -35,12 +35,12 @@
  *
  * Second Brain mode:
  *   When `config.secondBrain` is set, the hopper activates Second Brain mode:
- *     - DMs: captured as notes (unless they start with /ask or /save)
- *     - /save <url>: fetch URL → store as bookmark
+ *     - /save <url>:  fetch URL → store as bookmark
+ *     - /save <text>: store text note directly
  *     - /ask <query>: vector search warm tier → inline reply or LLM
- *     - 📌 reaction: bookmark the reacted message
- *     - Thread replies to bot messages: linked note with backref
- *   These interactions bypass the normal triage path.
+ *     - 📌 reaction:  bookmark the reacted message
+ *   Plain DMs (no slash-command prefix) pass through to normal triage.
+ *   Only explicit /save commands capture content.
  */
 
 import { SocketModeClient } from "@slack/socket-mode";
@@ -155,10 +155,10 @@ export class SlackHopper {
 
     // ── Second Brain command interception ─────────────────────────────────
     if (this.brain && event.channel) {
-      // /save <url> — store URL as a bookmark note
+      // /save <url|text> — bookmark a URL or store a text note
       if (text.startsWith("/save ")) {
-        const url = text.slice(6).trim();
-        await this._handleSaveUrl(event, url);
+        const arg = text.slice(6).trim();
+        await this._handleSave(event, arg);
         return;
       }
 
@@ -169,16 +169,7 @@ export class SlackHopper {
         return;
       }
 
-      // DM → capture as a note (unless it looks like a slash command)
-      if (event.channel_type === "im" && !text.startsWith("/")) {
-        // Thread reply to a (potentially bot) message → linked note
-        if (event.thread_ts && event.thread_ts !== event.ts) {
-          await this._handleLinkedNote(event);
-        } else {
-          await this._handleCapture(event);
-        }
-        return;
-      }
+      // Plain DMs (no /save or /ask prefix) fall through to normal triage.
     }
 
     // ── Normal triage path ────────────────────────────────────────────────
@@ -232,70 +223,43 @@ export class SlackHopper {
   // ── Second Brain handlers ──────────────────────────────────────────────────
 
   /**
-   * DM → capture as a plain note.
+   * /save <arg> — bookmark a URL or store a text note.
+   *
+   * If `arg` parses as an absolute http(s) URL, fetch the page and store it
+   * as a bookmark.  Otherwise treat the argument as plain text and store it
+   * as a capture note.
    */
-  private async _handleCapture(event: SlackMessageEvent): Promise<void> {
+  private async _handleSave(event: SlackMessageEvent, arg: string): Promise<void> {
     if (!this.brain || !event.channel) return;
-    const text = String(event.text ?? "").trim();
-    if (!text) return;
-
-    try {
-      const result = await this.brain.captureNote(text, event.ts);
-      console.log(`[SlackHopper] Second Brain: captured note id=${result.memoryId}`);
-      await this._postMessage(event, `_GristMill:_ Saved. ✓ (\`${result.memoryId.slice(0, 8)}…\`)`);
-    } catch (err) {
-      console.error("[SlackHopper] Second Brain: capture error:", err);
-    }
-  }
-
-  /**
-   * Thread reply to an existing message → capture as a linked note.
-   */
-  private async _handleLinkedNote(event: SlackMessageEvent): Promise<void> {
-    if (!this.brain || !event.channel || !event.thread_ts) return;
-    const text = String(event.text ?? "").trim();
-    if (!text) return;
-
-    try {
-      const parentId = await this.brain.findParentMemoryId(event.channel, event.thread_ts);
-      const result = await this.brain.captureNote(text, event.ts, parentId ?? undefined);
-      const backStr = parentId ? ` (linked to \`${parentId.slice(0, 8)}…\`)` : "";
-      console.log(`[SlackHopper] Second Brain: linked note id=${result.memoryId}${backStr}`);
-      await this._postMessage(event, `_GristMill:_ Saved${backStr}. ✓`);
-    } catch (err) {
-      console.error("[SlackHopper] Second Brain: linked note error:", err);
-    }
-  }
-
-  /**
-   * /save <url> → fetch URL content and store as bookmark.
-   */
-  private async _handleSaveUrl(event: SlackMessageEvent, url: string): Promise<void> {
-    if (!this.brain || !event.channel) return;
-    if (!url) {
-      await this._postMessage(event, "_GristMill:_ Usage: `/save <url>`");
+    if (!arg) {
+      await this._postMessage(event, "_GristMill:_ Usage: `/save <url or text>`");
       return;
     }
 
-    // Validate URL shape before fetching
-    try {
-      new URL(url);
-    } catch {
-      await this._postMessage(event, `_GristMill:_ Invalid URL: \`${url}\``);
-      return;
-    }
+    const isUrl = _looksLikeUrl(arg);
 
-    await this._postMessage(event, `_GristMill:_ Fetching \`${url}\`…`);
-    try {
-      const result = await this.brain.saveUrl(url, event.ts);
-      console.log(`[SlackHopper] Second Brain: saved URL id=${result.memoryId} url=${url}`);
-      await this._postMessage(
-        event,
-        `_GristMill:_ Bookmarked \`${url}\` ✓ (\`${result.memoryId.slice(0, 8)}…\`)`,
-      );
-    } catch (err) {
-      console.error("[SlackHopper] Second Brain: saveUrl error:", err);
-      await this._postMessage(event, `_GristMill:_ Failed to save URL: ${String(err)}`);
+    if (isUrl) {
+      await this._postMessage(event, `_GristMill:_ Fetching \`${arg}\`…`);
+      try {
+        const result = await this.brain.saveUrl(arg, event.ts);
+        console.log(`[SlackHopper] Second Brain: saved URL id=${result.memoryId} url=${arg}`);
+        await this._postMessage(
+          event,
+          `_GristMill:_ Bookmarked \`${arg}\` ✓ (\`${result.memoryId.slice(0, 8)}…\`)`,
+        );
+      } catch (err) {
+        console.error("[SlackHopper] Second Brain: saveUrl error:", err);
+        await this._postMessage(event, `_GristMill:_ Failed to save URL: ${String(err)}`);
+      }
+    } else {
+      try {
+        const result = await this.brain.captureNote(arg, event.ts);
+        console.log(`[SlackHopper] Second Brain: captured note id=${result.memoryId}`);
+        await this._postMessage(event, `_GristMill:_ Saved. ✓ (\`${result.memoryId.slice(0, 8)}…\`)`);
+      } catch (err) {
+        console.error("[SlackHopper] Second Brain: capture error:", err);
+        await this._postMessage(event, `_GristMill:_ Failed to save note: ${String(err)}`);
+      }
     }
   }
 
@@ -449,6 +413,19 @@ interface SlackReactionEvent {
     [key: string]: unknown;
   };
   [key: string]: unknown;
+}
+
+/**
+ * Return true if `s` looks like an absolute http(s) URL.
+ * Uses the URL constructor rather than a regex to avoid false positives.
+ */
+function _looksLikeUrl(s: string): boolean {
+  try {
+    const u = new URL(s);
+    return u.protocol === "http:" || u.protocol === "https:";
+  } catch {
+    return false;
+  }
 }
 
 function _convType(channelType?: string): string {
