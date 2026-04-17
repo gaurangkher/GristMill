@@ -236,7 +236,28 @@ nano gristmill-data/config.yaml
 
 Replace all `REPLACE_ME` placeholders with real values. The entrypoint will warn you at startup if any remain.
 
-### 2. Start
+### 2. GPU / architecture overlays
+
+GristMill ships compose override files for each host architecture. Layer one on top of the base `docker-compose.yml`:
+
+| Host | Override file | Notes |
+|------|--------------|-------|
+| Mac (Apple Silicon / Intel) | `docker-compose.mac.yml` | Uses native Ollama on the host via Metal; no Docker GPU required |
+| Linux + NVIDIA GPU | `docker-compose.nvidia.yml` | Requires `nvidia-container-toolkit` |
+| Linux + AMD GPU | `docker-compose.rocm.yml` | Requires ROCm drivers on the host |
+
+```bash
+# Mac — native Ollama (run `ollama serve` in a separate terminal first)
+docker compose -f docker-compose.yml -f docker-compose.mac.yml up -d
+
+# NVIDIA GPU
+docker compose -f docker-compose.yml -f docker-compose.nvidia.yml --profile ollama up -d
+
+# AMD ROCm
+docker compose -f docker-compose.yml -f docker-compose.rocm.yml --profile ollama up -d
+```
+
+### 3. Start
 
 ```bash
 # Core only (daemon + dashboard)
@@ -254,7 +275,7 @@ ANTHROPIC_API_KEY=sk-ant-... docker compose --profile full up -d
 
 Dashboard: **http://localhost:3000**
 
-### 3. Profiles
+### 4. Profiles
 
 | Profile | Adds | Port |
 |---------|------|------|
@@ -264,11 +285,11 @@ Dashboard: **http://localhost:3000**
 | `mlflow` | MLflow experiment tracking UI | 5050 |
 | `full` | All of the above | — |
 
-### 4. First trainer start
+### 5. First trainer start
 
 On first boot the trainer container downloads ~400 MB of HuggingFace model weights into `gristmill-data/models/`. The healthcheck has a 120-second start period to allow for this. Subsequent starts skip the download.
 
-### 5. Useful commands
+### 7. Useful commands
 
 ```bash
 # Follow logs
@@ -300,6 +321,7 @@ docker compose --profile full down -v
 sieve:
   confidence_threshold: 0.85   # escalate to LLM when confidence < this
   cache_size: 10000
+  training_buffer_path: ~/.gristmill/db/training_buffer.sqlite  # stores Ollama responses for LoRA distillation
 
 hammer:
   providers:
@@ -345,10 +367,29 @@ integrations:
   hoppers:
     http:
       port: 3001
+  slack:
+    app_token: ${SLACK_APP_TOKEN}     # xapp-... — Socket Mode app token
+    bot_token: ${SLACK_BOT_TOKEN}     # xoxb-... — bot OAuth token
+    signing_secret: ${SLACK_SIGNING_SECRET}
+    second_brain:
+      enabled: true
+      stale_days: 180                 # recall memories newer than this many days
   plugins_dir: ~/.gristmill/plugins/
 ```
 
 Secrets are always passed via environment variables — never hardcoded.
+
+### Slack Second Brain commands
+
+When the Slack integration is enabled, GristMill listens in any channel it's invited to:
+
+| Command | What it does |
+|---------|-------------|
+| `/save <text>` or `!save <text>` | Stores `<text>` as a memory entry with the Slack user as the author tag |
+| `/ask <query>` or `!ask <query>` | Recalls the top 5 memories matching the query and replies in-thread |
+| 📌 reaction | Pins the reacted message as a memory |
+
+Memory entries saved via Slack are written to the warm tier immediately and survive restarts.
 
 ---
 
@@ -482,10 +523,14 @@ See [`gristmill-v2-architecture.md`](./gristmill-v2-architecture.md) for the ful
 | Variable | Used by | Description |
 |----------|---------|-------------|
 | `ANTHROPIC_API_KEY` | `grist-hammer` | Anthropic API key for Claude escalation |
-| `SLACK_WEBHOOK_URL` | Bell Tower | Slack Incoming Webhook URL |
+| `SLACK_APP_TOKEN` | Integrations | Slack Socket Mode app token (`xapp-...`) |
+| `SLACK_BOT_TOKEN` | Integrations | Slack bot OAuth token (`xoxb-...`) |
+| `SLACK_SIGNING_SECRET` | Integrations | Slack signing secret for webhook verification |
+| `SLACK_WEBHOOK_URL` | Bell Tower | Slack Incoming Webhook URL (for outbound notifications) |
 | `EMAIL_USER` / `EMAIL_PASS` | Bell Tower | SMTP credentials for email notifications |
 | `GRISTMILL_CONFIG` | All | Config file path (default: `~/.gristmill/config.yaml`) |
 | `GRISTMILL_SOCK` | Daemon + TS shell | Unix socket path (default: `~/.gristmill/gristmill.sock`) |
+| `GRISTMILL_HAMMER_OLLAMA_BASE_URL` | `grist-hammer` | Override Ollama base URL (e.g. `http://host.docker.internal:11434`) |
 | `TRAINER_URL` | TypeScript shell | Trainer API base URL (default: `http://127.0.0.1:7432`) |
 | `GRISTMILL_MOCK_BRIDGE` | TypeScript | Set to `1` to skip native `.node` bridge (dev/test only) |
 | `RUST_LOG` | Rust core | Log filter, e.g. `RUST_LOG=grist_sieve=debug` |

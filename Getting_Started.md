@@ -21,8 +21,9 @@ retraining all happen in the same unified system.
 7. [How to define Pipelines](#7-how-to-define-pipelines)
 8. [How to train the Sieve](#8-how-to-train-the-sieve)
 9. [Notifications (Bell Tower)](#9-notifications-bell-tower)
-10. [Observability](#10-observability)
-11. [CLI Quick Reference](#11-cli-quick-reference)
+10. [Slack Second Brain](#10-slack-second-brain)
+11. [Observability](#11-observability)
+12. [CLI Quick Reference](#12-cli-quick-reference)
 
 ---
 
@@ -67,6 +68,7 @@ sieve:
   confidence_threshold: 0.85  # escalate to LLM when confidence < this
   feedback_dir: ~/.gristmill/feedback/
   cache_size: 10000           # exact-match cache entries
+  training_buffer_path: ~/.gristmill/db/training_buffer.sqlite  # Ollama responses for LoRA distillation
 
 # ── Grinders (local model pool) ──────────────────────────────────────────────
 grinders:
@@ -222,6 +224,18 @@ Data is persisted to a `gristmill-data` Docker volume. Pass secrets via environm
 ```bash
 ANTHROPIC_API_KEY=sk-ant-... docker compose up -d
 ```
+
+#### GPU / architecture overlays
+
+Layer an overlay file on top of the base compose file to match your host:
+
+| Host | Command |
+|------|---------|
+| **Mac** (Apple Silicon or Intel) | `docker compose -f docker-compose.yml -f docker-compose.mac.yml up -d` |
+| **Linux + NVIDIA GPU** | `docker compose -f docker-compose.yml -f docker-compose.nvidia.yml --profile ollama up -d` |
+| **Linux + AMD ROCm** | `docker compose -f docker-compose.yml -f docker-compose.rocm.yml --profile ollama up -d` |
+
+Mac overlay prerequisites: install Ollama natively (`brew install ollama`), then run `ollama serve` and `ollama pull llama3.1:8b` before starting compose. The overlay connects the container to the host's Ollama process via `host.docker.internal:11434` (Metal GPU acceleration included).
 
 ---
 
@@ -891,7 +905,50 @@ bell_tower:
 
 ---
 
-## 10. Observability
+## 10. Slack Second Brain
+
+When the Slack integration is active, GristMill listens for commands in any channel it is invited to and connects them to the Ledger memory system.
+
+### Enable the integration
+
+Add to `config.yaml`:
+
+```yaml
+integrations:
+  slack:
+    app_token: ${SLACK_APP_TOKEN}      # xapp-... (Socket Mode)
+    bot_token: ${SLACK_BOT_TOKEN}      # xoxb-...
+    signing_secret: ${SLACK_SIGNING_SECRET}
+    second_brain:
+      enabled: true
+      stale_days: 180                  # only surface memories newer than N days
+```
+
+### Commands
+
+| What you type in Slack | What happens |
+|------------------------|-------------|
+| `!save <text>` | Stores `<text>` as a memory entry; tagged with your Slack username |
+| `!ask <query>` | Recalls the top 5 relevant memories and posts them in a thread reply |
+| React with 📌 to any message | Saves the reacted message as a memory |
+
+Saved memories are written to the warm tier immediately, so they survive restarts.
+
+### Example
+
+```
+You:         !save prod-db-01 disk alert resolved by pruning WAL logs
+GristMill:   ✅ Saved memory 01HXYZ...
+
+You:         !ask how to fix disk alerts on postgres
+GristMill:   Here's what I remember:
+             1. prod-db-01 disk alert resolved by pruning WAL logs (3 min ago)
+             2. Disk alert threshold is 85%. Resolve by pruning WAL: pg_archivecleanup
+```
+
+---
+
+## 11. Observability
 
 ### Health and metrics
 
@@ -930,7 +987,7 @@ cd gristmill-integrations && pnpm test
 
 ---
 
-## 11. CLI Quick Reference
+## 12. CLI Quick Reference
 
 All subcommands connect to the running daemon via the Unix socket.
 

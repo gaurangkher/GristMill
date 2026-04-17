@@ -171,7 +171,7 @@ impl HotTier {
             .collect();
 
         // Most-recently used first.
-        matches.sort_by(|a, b| b.0.last_accessed_ms.cmp(&a.0.last_accessed_ms));
+        matches.sort_by_key(|b| std::cmp::Reverse(b.0.last_accessed_ms));
         matches.truncate(limit);
         matches
     }
