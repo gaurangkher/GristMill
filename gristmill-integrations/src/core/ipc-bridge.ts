@@ -243,10 +243,12 @@ export class IpcBridge implements IBridge {
   }
 
   async recall(query: string, limit = 10): Promise<RankedMemory[]> {
-    const result = await this.send({
-      method: "recall",
-      params: { query, limit },
-    });
+    // 3-minute timeout: ONNX embedding on CPU can take 30-90 s on first call
+    // (model load + thread-pool init). Subsequent calls are much faster once warm.
+    const result = await this.send(
+      { method: "recall", params: { query, limit } },
+      180_000,
+    );
     return result as RankedMemory[];
   }
 
@@ -259,10 +261,11 @@ export class IpcBridge implements IBridge {
   }
 
   async escalate(prompt: string, maxTokens = 1024): Promise<EscalationResult> {
-    const result = await this.send({
-      method: "escalate",
-      params: { prompt, max_tokens: maxTokens },
-    });
+    // 3-minute timeout: LLM round-trips can be slow, especially via Ollama locally.
+    const result = await this.send(
+      { method: "escalate", params: { prompt, max_tokens: maxTokens } },
+      180_000,
+    );
     return result as EscalationResult;
   }
 

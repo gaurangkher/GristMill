@@ -144,10 +144,15 @@ impl Ledger {
 
     /// Store a memory in the ledger.
     ///
-    /// Inserts into the hot tier immediately with a zero-vector placeholder.
-    /// The real embedding is computed asynchronously by the eviction drainer
-    /// when the memory cascades to the warm tier, keeping this call fast
-    /// regardless of ONNX inference latency.
+    /// Embeds the content synchronously, then writes to both the hot tier
+    /// (LRU + sled) and the warm tier (SQLite FTS5 + usearch) in the same
+    /// call.  This makes every note immediately searchable via `recall()`
+    /// and durable across daemon restarts (warm tier paths are persisted on
+    /// the mounted volume).
+    ///
+    /// The embedding cost (~1-5 s on CPU) is paid at save time rather than
+    /// at eviction time, which is acceptable for a second-brain use case
+    /// where notes are written infrequently but queried often.
     ///
     /// Semantic deduplication (sim ≥ 0.95) is attempted only when the warm
     /// tier already has indexed entries — it is skipped on first use.
@@ -159,9 +164,14 @@ impl Ledger {
         let content: String = content.into();
         let memory = Memory::new(content.clone(), tags);
 
+        // Always embed immediately so notes land in warm on the same call.
+        let embedder = Arc::clone(&self.embedder);
+        let text = content.clone();
+        let embedding = tokio::task::spawn_blocking(move || embedder.embed(&text))
+            .await
+            .map_err(|e| LedgerError::Other(e.into()))??;
+
         // ── Duplicate check (only when warm has entries) ───────────────────
-        // Skipped on first use: avoids a costly ONNX embed call when the warm
-        // tier is empty and there is nothing to deduplicate against.
         let warm_count = {
             let warm = Arc::clone(&self.warm);
             tokio::task::spawn_blocking(move || warm.count())
@@ -170,12 +180,6 @@ impl Ledger {
         };
 
         if warm_count > 0 {
-            let embedder = Arc::clone(&self.embedder);
-            let text = content.clone();
-            let embedding = tokio::task::spawn_blocking(move || embedder.embed(&text))
-                .await
-                .map_err(|e| LedgerError::Other(e.into()))??;
-
             let warm = Arc::clone(&self.warm);
             let emb_clone = embedding.clone();
             let existing = tokio::task::spawn_blocking(move || warm.find_similar(&emb_clone, 0.95))
@@ -193,19 +197,22 @@ impl Ledger {
                 metrics::counter!("ledger.remember.duplicates").increment(1);
                 return Ok(existing_mem.id);
             }
-
-            // Insert with the real embedding so usearch gets it on eviction.
-            let id = self.hot.insert(memory, embedding)?;
-            debug!(memory_id = %id, "memory stored in hot tier (with embedding)");
-            metrics::counter!("ledger.remember.total").increment(1);
-            return Ok(id);
         }
 
-        // ── Fast path: warm is empty, defer embedding to eviction drainer ──
-        // The drainer will compute the real embedding before inserting into warm.
-        let placeholder = vec![0.0f32; self.embedder.dim()];
-        let id = self.hot.insert(memory, placeholder)?;
-        debug!(memory_id = %id, "memory stored in hot tier (embedding deferred)");
+        // Insert into hot with the real embedding (eviction drainer will skip
+        // re-embedding since the vector is non-zero).
+        let mem_for_warm = memory.clone();
+        let emb_for_warm = embedding.clone();
+        let id = self.hot.insert(memory, embedding)?;
+
+        // Write to warm immediately — warm.insert uses INSERT OR REPLACE so
+        // the later eviction-drainer write is a harmless no-op.
+        let warm = Arc::clone(&self.warm);
+        tokio::task::spawn_blocking(move || warm.insert(&mem_for_warm, &emb_for_warm))
+            .await
+            .map_err(|e| LedgerError::Other(e.into()))??;
+
+        debug!(memory_id = %id, "memory stored in hot + warm tiers");
         metrics::counter!("ledger.remember.total").increment(1);
         Ok(id)
     }
@@ -632,6 +639,90 @@ mod tests {
         assert!(
             (score_a - score_b).abs() < 1e-10,
             "symmetric inputs → equal RRF scores"
+        );
+    }
+
+    // ── Warm-tier immediate write (Option B) ───────────────────────────────
+
+    /// After a single `remember()` call, the warm tier should contain at
+    /// least one entry — without any LRU eviction needing to occur first.
+    /// This verifies the Option-B fix: warm is written eagerly on every save.
+    #[tokio::test]
+    async fn remember_writes_to_warm_immediately() {
+        let dir = tempfile::tempdir().unwrap();
+        let ledger = make_ledger(&dir).await; // lru_capacity = 4
+
+        // Single remember — well below the LRU capacity of 4, so no eviction
+        // would occur under the old behaviour.
+        ledger
+            .remember("immediate warm write test note", vec![])
+            .await
+            .unwrap();
+
+        // Warm should be non-empty right away (no eviction needed).
+        let warm_count = tokio::task::spawn_blocking({
+            let warm = Arc::clone(&ledger.warm);
+            move || warm.count()
+        })
+        .await
+        .unwrap()
+        .unwrap();
+
+        assert!(
+            warm_count > 0,
+            "warm tier should have an entry immediately after remember(), \
+             before any LRU eviction (Option-B immediate write)"
+        );
+    }
+
+    /// Verify that notes stored before the hot LRU is full are still
+    /// recallable after the LRU overflows and the early entries are evicted.
+    ///
+    /// With the Option-B fix, warm already holds every note from the moment
+    /// it was stored, so recall should succeed regardless of eviction order.
+    #[tokio::test]
+    async fn notes_survive_hot_eviction() {
+        let dir = tempfile::tempdir().unwrap();
+        let ledger = make_ledger(&dir).await; // lru_capacity = 4
+
+        // Store 2 notes — these will be evicted once we exceed capacity.
+        let mut early_ids: Vec<String> = Vec::new();
+        for i in 0..2 {
+            let id = ledger
+                .remember(format!("early persistence note index {i}"), vec![])
+                .await
+                .unwrap();
+            early_ids.push(id);
+        }
+
+        // Push hot past its capacity (4) so the early notes are evicted.
+        for i in 0..5 {
+            ledger
+                .remember(format!("filler entry to trigger eviction {i}"), vec![])
+                .await
+                .unwrap();
+        }
+
+        // Allow the eviction drainer to finish its INSERT OR REPLACE.
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+
+        // Every early note must still be retrievable via get().
+        for id in &early_ids {
+            let mem = ledger.get(id).await.unwrap();
+            assert!(
+                mem.is_some(),
+                "note {id} should survive hot eviction because warm already \
+                 holds it from the Option-B immediate write"
+            );
+        }
+
+        // And recall must find them by content keyword.
+        let results = ledger.recall("early persistence note", 10).await.unwrap();
+        assert!(
+            results.len() >= 2,
+            "recall should return at least the 2 early notes after hot eviction, \
+             got {}",
+            results.len()
         );
     }
 }

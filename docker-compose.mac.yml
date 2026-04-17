@@ -1,0 +1,34 @@
+# GristMill — Mac (Apple Silicon / Intel) overlay
+#
+# Uses native Ollama on the Mac host instead of a Docker container.
+# Metal GPU acceleration is available this way; Docker Ollama on Mac
+# runs inside a Linux VM with no GPU access.
+#
+# Prerequisites:
+#   brew install ollama
+#   ollama serve           # keep running in a separate terminal
+#   ollama pull llama3.1:8b
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.mac.yml up -d
+#   docker compose -f docker-compose.yml -f docker-compose.mac.yml --profile trainer up -d
+#
+# The --profile ollama flag is NOT needed (and will be ignored) because
+# this overlay removes the ollama container dependency entirely.
+
+services:
+  gristmill:
+    environment:
+      # host.docker.internal resolves to the Mac host from inside any container.
+      GRISTMILL_HAMMER_OLLAMA_BASE_URL: "http://host.docker.internal:11434"
+    depends_on:
+      # Remove the ollama container dependency — native Ollama is assumed running.
+      ollama:
+        condition: service_started
+        required: false
+
+  # Stub out the ollama service so Compose doesn't complain when the
+  # ollama profile is omitted, and so --profile ollama doesn't start a
+  # useless CPU-only container.
+  ollama:
+    profiles: [_disabled]

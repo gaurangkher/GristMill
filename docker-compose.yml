@@ -63,6 +63,11 @@ services:
         source: ./gristmill-data/feedback
         target: /data/gristmill/feedback
 
+      # ── Training buffer (Ollama responses queued for LoRA distillation) ──────
+      - type: bind
+        source: ./gristmill-data/db
+        target: /data/gristmill/db
+
       # ── Plugins (.mjs files dropped here are loaded at startup) ────────────
       - type: bind
         source: ./gristmill-data/plugins
@@ -86,8 +91,11 @@ services:
       GRISTMILL_SOCK: /data/gristmill/gristmill.sock
       # When running --profile trainer, proxy requests to the trainer container
       TRAINER_URL: "http://trainer:7432"
-      # Use the Docker service name — "localhost" inside this container is not Ollama
-      GRISTMILL_HAMMER_OLLAMA_BASE_URL: "http://ollama:11434"
+      # Ollama URL — defaults to the Docker service name when running --profile ollama.
+      # Override via .env or docker-compose.<arch>.yml for other setups:
+      #   Mac native Ollama:   GRISTMILL_HAMMER_OLLAMA_BASE_URL=http://host.docker.internal:11434
+      #   External Ollama:     GRISTMILL_HAMMER_OLLAMA_BASE_URL=http://<host>:11434
+      GRISTMILL_HAMMER_OLLAMA_BASE_URL: "${GRISTMILL_HAMMER_OLLAMA_BASE_URL:-http://ollama:11434}"
     healthcheck:
       test:
         - CMD

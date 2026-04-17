@@ -155,6 +155,7 @@ if (config.slack.appToken && config.slack.botToken) {
     appToken: config.slack.appToken,
     botToken: config.slack.botToken,
     replyMode: config.slack.replyMode,
+    secondBrain: config.slack.secondBrain ?? undefined,
   });
   await slackHopper.start();
 } else {

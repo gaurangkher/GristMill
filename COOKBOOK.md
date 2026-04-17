@@ -16,6 +16,8 @@
 10. [Test your integration without a running daemon](#recipe-10--test-your-integration-without-a-running-daemon)
 11. [Check system health from the CLI](#recipe-11--check-system-health-from-the-cli)
 12. [Bootstrap models on a fresh install](#recipe-12--bootstrap-models-on-a-fresh-install)
+13. [Use Slack as a Second Brain](#recipe-13--use-slack-as-a-second-brain)
+14. [Run GristMill on Mac with GPU-accelerated Ollama](#recipe-14--run-gristmill-on-mac-with-gpu-accelerated-ollama)
 
 ---
 
@@ -545,4 +547,104 @@ python scripts/bootstrap_models.py  # → skips, prints "models already exist"
 
 # Force re-export (e.g. after updating Python)
 python scripts/bootstrap_models.py --force
+```
+
+---
+
+### Recipe 13 — Use Slack as a Second Brain
+
+**What it does:** Connects GristMill's three-tier memory to a Slack workspace so team members can save and recall knowledge with simple Slack commands — no API calls required.
+
+**When to use it:** When you want your whole team to contribute to and query a shared runbook/knowledge base from within Slack, without switching context.
+
+#### Prerequisites
+
+1. Create a Slack app at [api.slack.com/apps](https://api.slack.com/apps) with Socket Mode enabled.
+2. Add the following bot token scopes: `app_mentions:read`, `channels:history`, `chat:write`, `reactions:read`.
+3. Install the app to your workspace and invite it to the channels you want monitored.
+
+#### Config
+
+```yaml
+# config.yaml
+integrations:
+  slack:
+    app_token: ${SLACK_APP_TOKEN}      # xapp-... — Socket Mode app token
+    bot_token: ${SLACK_BOT_TOKEN}      # xoxb-... — bot OAuth token
+    signing_secret: ${SLACK_SIGNING_SECRET}
+    second_brain:
+      enabled: true
+      stale_days: 180                  # suppress memories older than N days in recall results
+```
+
+```bash
+# Environment
+export SLACK_APP_TOKEN="xapp-..."
+export SLACK_BOT_TOKEN="xoxb-..."
+export SLACK_SIGNING_SECRET="..."
+```
+
+#### Usage
+
+```
+# Save a memory
+Alice: !save prod-db-01 runs PostgreSQL 15 with WAL archiving to S3
+GristMill: ✅ Saved (id: 01HXYZ...)
+
+# React with 📌 to save any message
+Alice: [reacts 📌 to Bob's message "disk alert resolved by pruning WAL logs"]
+GristMill: ✅ Saved Bob's message as a memory
+
+# Recall
+Alice: !ask how to fix disk space on postgres
+GristMill: 🧠 Here's what I know:
+           1. prod-db-01 disk alert resolved by pruning WAL logs (5 min ago, score 0.96)
+           2. Disk alert threshold is 85%. Resolve by pruning WAL: pg_archivecleanup (2 days ago, score 0.91)
+           3. prod-db-01 runs PostgreSQL 15 with WAL archiving to S3 (1 week ago, score 0.88)
+```
+
+#### How it works
+
+- `!save <text>` and 📌 reactions call `bridge.remember()` — memories are written to the warm tier (SQLite + vector index) immediately and persist across restarts.
+- `!ask <query>` calls `bridge.recall()` — returns up to 5 results ranked by semantic similarity + recency, filtered to the last `stale_days` days.
+- The Slack user's display name is stored as the `author` tag on every memory.
+
+---
+
+### Recipe 14 — Run GristMill on Mac with GPU-accelerated Ollama
+
+**What it does:** Uses the `docker-compose.mac.yml` overlay to connect the GristMill container to a natively running Ollama process on the Mac host, giving Ollama access to the Apple GPU via Metal — something Docker Desktop's Linux VM cannot provide.
+
+**When to use it:** On Apple Silicon or Intel Macs when you want local LLM inference at native Metal speed without running an additional Docker container for Ollama.
+
+```bash
+# Step 1 — Install and start Ollama natively
+brew install ollama
+ollama serve                  # keep running in a separate terminal
+ollama pull llama3.1:8b       # one-time download (~4 GB)
+
+# Step 2 — Start GristMill with the Mac overlay
+docker compose -f docker-compose.yml -f docker-compose.mac.yml up -d
+
+# Step 3 — Verify Ollama is reachable from the container
+docker compose exec gristmill curl -s http://host.docker.internal:11434/api/tags | jq '.models[].name'
+# → "llama3.1:8b"
+
+# Step 4 — Optional: add the trainer profile
+docker compose -f docker-compose.yml -f docker-compose.mac.yml --profile trainer up -d
+
+# Stop
+docker compose -f docker-compose.yml -f docker-compose.mac.yml down
+```
+
+**What the overlay does:**
+- Sets `GRISTMILL_HAMMER_OLLAMA_BASE_URL=http://host.docker.internal:11434` so the Rust `grist-hammer` talks to the host's Ollama process.
+- Disables the `ollama` Docker service (tagged `profiles: [_disabled]`) so `--profile ollama` is silently ignored — no CPU-only container is started.
+- Requires no change to `config.yaml` — the env var takes precedence.
+
+**Training buffer note:** Ollama responses are stored in `gristmill-data/db/training_buffer.sqlite` (bind-mounted from the host). Ensure your `config.yaml` has:
+
+```yaml
+sieve:
+  training_buffer_path: /data/gristmill/db/training_buffer.sqlite
 ```

@@ -1,0 +1,196 @@
+# GristMill v2 — Configuration Template
+#
+# Copy this file to config.yaml and fill in your values:
+#
+#   cp gristmill-data/config.yaml.template gristmill-data/config.yaml
+#
+# Secrets can be provided two ways (the env var always wins if both are set):
+#   1. Directly in this file (convenient for local dev, never commit real keys)
+#   2. Via environment variables — use ${VAR_NAME} as the value and export the
+#      variable in your shell or docker-compose environment block.
+#
+# Docker paths: /data/gristmill/ (bind-mounted from ./gristmill-data/)
+# Local paths:  ~/.gristmill/
+#
+# The entrypoint will warn you at startup if any REPLACE_ME placeholder
+# remains in the file.
+
+# ── Core ─────────────────────────────────────────────────────────────────────
+core:
+  workspace: /data/gristmill        # Docker: /data/gristmill | Local: ~/.gristmill
+  log_level: info                   # trace | debug | info | warn | error
+  mode: daemon                      # daemon | cli | embedded
+
+# ── Sieve (triage classifier) ────────────────────────────────────────────────
+sieve:
+  confidence_threshold: 0.85        # escalate to LLM when confidence < this (0.0–1.0)
+  feedback_dir: /data/gristmill/feedback/   # routing decisions written here as JSONL
+  cache_size: 10000                 # exact-match result cache entries (LRU)
+  training_buffer_path: /data/gristmill/db/training_buffer.sqlite
+                                    # SQLite WAL of Ollama responses used for LoRA
+                                    # distillation; omit to disable the buffer
+  # model: /data/gristmill/models/intent-classifier-v1.onnx
+  #   Optional explicit path to the sieve ONNX model.
+  #   Defaults to the first model registered under grinders.
+
+# ── Grinders (local model pool) ──────────────────────────────────────────────
+# Each model is a named map entry — the key becomes the model ID used in
+# pipeline steps ("model_id": "intent-classifier-v1").
+grinders:
+  workers: 0                        # 0 = auto (CPU cores − 1) | or an explicit int
+  models:
+    intent-classifier-v1:
+      runtime: onnx                 # onnx | gguf | tflite
+      path: /data/gristmill/models/intent-classifier-v1.onnx
+      warm: true                    # pre-load on startup
+      max_batch: 32
+      timeout_ms: 500
+      # max_tokens is only used for GGUF/LLM models, not ONNX classifiers
+
+    embedder:
+      runtime: onnx
+      path: /data/gristmill/models/minilm-l6-v2.onnx
+      warm: true
+      max_batch: 64
+      timeout_ms: 200
+
+    # Example GGUF model (uncomment to use a local LLM via grinders)
+    # phi3-mini:
+    #   runtime: gguf
+    #   path: /data/gristmill/models/phi3-mini-4k-instruct-q4.gguf
+    #   warm: false
+    #   max_tokens: 512
+    #   timeout_ms: 30000
+
+# ── Hammer (LLM gateway) ─────────────────────────────────────────────────────
+hammer:
+  providers:
+    anthropic:
+      api_key: "${ANTHROPIC_API_KEY}"          # sk-ant-...
+      default_model: claude-sonnet-4-20250514  # primary model
+      fallback_model: claude-haiku-4-5-20251001  # used when primary is rate-limited
+      base_url: https://api.anthropic.com      # override for proxies/custom endpoints
+
+    ollama:
+      enabled: true                            # set false to skip Ollama entirely
+      # Docker (default profile):              http://ollama:11434
+      # Docker (mac overlay):                  http://host.docker.internal:11434
+      # Local:                                 http://localhost:11434
+      base_url: http://ollama:11434
+      model: llama3.1:8b
+
+  budget:
+    daily_tokens: 500000            # hard cap per calendar day (UTC)
+    monthly_tokens: 10000000        # hard cap per calendar month
+
+  cache:
+    enabled: true
+    similarity_threshold: 0.92      # reuse cached response when cosine similarity ≥ this
+    max_entries: 50000              # max cached responses (LRU eviction above this)
+
+  batch:
+    enabled: true
+    window_ms: 5000                 # collect requests for this window before sending batch
+    max_batch_size: 10              # flush early if batch reaches this size
+
+# ── Millwright (DAG orchestrator) ────────────────────────────────────────────
+millwright:
+  max_concurrency: 8               # max parallel steps across all running pipelines
+  default_timeout_ms: 30000        # per-step wall-clock limit (overridable per step)
+  checkpoint_dir: /data/gristmill/checkpoints/
+
+# ── Ledger (three-tier memory) ───────────────────────────────────────────────
+ledger:
+  hot:
+    max_size_mb: 512               # in-process LRU sled cache size
+
+  warm:
+    db_path: /data/gristmill/memory/warm.db
+    vector_index_path: /data/gristmill/memory/vectors.usearch
+    fts_enabled: true              # SQLite FTS5 full-text search alongside vectors
+
+  cold:
+    archive_dir: /data/gristmill/memory/cold/
+    compression: zstd              # zstd | lz4 | none
+    compress_level: 3              # zstd level 1–22 (3 = good balance of speed/ratio)
+
+  compaction:
+    interval_hours: 6              # background compaction cadence
+    similarity_threshold: 0.90     # deduplicate entries with cosine similarity ≥ this
+    verbose_threshold_tokens: 512  # summarise memories longer than this
+    stale_days: 90                 # demote warm entries not accessed in this many days
+
+# ── Bell Tower (notifications) ───────────────────────────────────────────────
+bell_tower:
+  channels:
+    slack:
+      # Outbound Incoming Webhook — used by Bell Tower alert watches.
+      # Distinct from the integrations.slack Socket Mode tokens below.
+      webhook_url: "${SLACK_WEBHOOK_URL}"     # https://hooks.slack.com/services/...
+
+    telegram:
+      bot_token: "${TELEGRAM_BOT_TOKEN}"      # from @BotFather
+      chat_id: "${TELEGRAM_CHAT_ID}"          # numeric chat/channel ID
+
+    email:
+      smtp_host: smtp.gmail.com
+      smtp_port: 587
+      username: "${EMAIL_USER}"               # your@gmail.com
+      password: "${EMAIL_PASS}"               # app password (not your account password)
+
+  quiet_hours:
+    start: "22:00"
+    end: "07:00"
+    timezone: UTC                  # IANA timezone, e.g. America/New_York
+    override_for: [critical]       # priorities that bypass quiet hours
+
+  digest:
+    enabled: true
+    interval_minutes: 60           # bundle low/normal alerts into a periodic summary
+    max_items: 50                  # cap items per digest message
+
+# ── Integrations (TypeScript shell) ──────────────────────────────────────────
+integrations:
+  dashboard:
+    enabled: true
+    port: 3000                     # dashboard + API port
+
+  plugins_dir: /data/gristmill/plugins/
+
+  # Slack inbound integration — Socket Mode + Second Brain commands
+  # Required scopes: app_mentions:read, channels:history, chat:write, reactions:read
+  slack:
+    app_token: "${SLACK_APP_TOKEN}"           # xapp-... (Socket Mode)
+    bot_token: "${SLACK_BOT_TOKEN}"           # xoxb-... (bot OAuth token)
+    signing_secret: "${SLACK_SIGNING_SECRET}" # request signing verification
+    reply_mode: thread                        # thread | off
+
+    second_brain:
+      enabled: true
+      stale_days: 180              # suppress recall results older than N days
+
+  # Inbound hoppers
+  # HttpHopper  — POST /events (general event intake)       default: 3001
+  # WebhookHopper — POST /webhooks/:channel (HMAC-signed)  default: 3002
+  # These must be different ports. Do not set both to the same value.
+  hoppers:
+    http:
+      port: 3001
+      host: "0.0.0.0"
+
+    webhook:
+      port: 3002
+      channels:
+        # Add one entry per external service that sends you webhooks.
+        # Leave secret empty ("") to skip HMAC verification (local dev only).
+        web-capture:
+          secret: "${WEB_CAPTURE_WEBHOOK_SECRET}"
+          # header: "x-hub-signature-256"   # default; override if needed
+
+        # github:
+        #   secret: "${GITHUB_WEBHOOK_SECRET}"
+        #   header: "x-hub-signature-256"
+
+        # stripe:
+        #   secret: "${STRIPE_WEBHOOK_SECRET}"
+        #   header: "stripe-signature"

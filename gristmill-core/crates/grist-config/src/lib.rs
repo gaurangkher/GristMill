@@ -865,6 +865,39 @@ grinders:
         assert_eq!(summ.max_tokens, Some(512));
     }
 
+    // ── training_buffer_path ──────────────────────────────────────────────
+
+    #[test]
+    fn training_buffer_path_parsed_from_yaml() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.yaml");
+        let yaml = r#"
+sieve:
+  training_buffer_path: /data/gristmill/db/training_buffer.sqlite
+"#;
+        std::fs::write(&path, yaml).unwrap();
+        let c = GristMillConfig::load_from(path).unwrap();
+        let buf_path = c
+            .sieve
+            .training_buffer_path
+            .as_ref()
+            .expect("training_buffer_path should be Some after parsing YAML");
+        assert_eq!(
+            buf_path.to_string_lossy(),
+            "/data/gristmill/db/training_buffer.sqlite",
+            "training_buffer_path should match the value in YAML"
+        );
+    }
+
+    #[test]
+    fn training_buffer_path_defaults_to_none() {
+        let c = SieveConfig::default();
+        assert!(
+            c.training_buffer_path.is_none(),
+            "training_buffer_path should default to None when not set in YAML"
+        );
+    }
+
     // ── apply_env ─────────────────────────────────────────────────────────
 
     #[test]

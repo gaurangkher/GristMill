@@ -213,7 +213,12 @@ export class SecondBrainHandler {
    *    prompt (budget-managed by grist-hammer).
    */
   async queryNotes(query: string): Promise<QueryResult> {
+    const t0 = Date.now();
+
     const results = await this.bridge.recall(query, this.maxRecallLimit);
+    const recallMs = Date.now() - t0;
+
+    console.log(`[SecondBrain] recall completed in ${recallMs}ms, results=${results.length}`);
 
     if (results.length === 0) {
       return {
@@ -236,6 +241,7 @@ export class SecondBrainHandler {
         })
         .join("\n\n");
 
+      console.log(`[SecondBrain] inline reply (no LLM), topScore=${topScore.toFixed(3)}`);
       return {
         replyText:
           `_GristMill:_ Found ${results.length} note(s) for *${_escapeSlack(query)}*:\n\n${snippets}`,
@@ -255,15 +261,20 @@ export class SecondBrainHandler {
       `If the notes do not contain enough information, say so.\n\n` +
       `User question: ${query}\n\nRelevant notes:\n${context}\n\nAnswer:`;
 
+    const t1 = Date.now();
     try {
       const escalation = await this.bridge.escalate(prompt, 512);
+      const escalateMs = Date.now() - t1;
+      console.log(`[SecondBrain] escalation completed in ${escalateMs}ms, provider=${escalation.provider}, tokens=${escalation.tokensUsed}, cacheHit=${escalation.cacheHit}`);
       return {
         replyText: `_GristMill:_ ${escalation.content.trim()}`,
         sourceCount: results.length,
         usedLlm: true,
       };
     } catch (err: unknown) {
+      const escalateMs = Date.now() - t1;
       const msg = err instanceof Error ? err.message : String(err);
+      console.log(`[SecondBrain] escalation failed after ${escalateMs}ms: ${msg}`);
       // Fall back to inline reply if escalation fails.
       const fallback = results[0]!.memory.content.slice(0, this.snippetLength);
       return {
