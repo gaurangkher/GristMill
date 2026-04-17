@@ -1,0 +1,16 @@
+# GristMill — AMD ROCm GPU overlay
+#
+# Passes AMD GPU devices into the Ollama container for ROCm-accelerated inference.
+# Requires ROCm drivers on the host (Linux only).
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.rocm.yml --profile ollama up -d
+
+services:
+  ollama:
+    image: ollama/ollama:rocm
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    environment:
+      OLLAMA_KEEP_ALIVE: "5m"

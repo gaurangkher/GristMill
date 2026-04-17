@@ -113,21 +113,36 @@ export class SlackHopper {
       await this._handleEvent(event as SlackMessageEvent);
     });
 
-    // message: DMs only.
+    // message: DMs + Second Brain commands in channels.
     //
-    // Channel messages where the bot is @mentioned fire BOTH an `app_mention`
-    // event (handled above) AND a `message` event.  Processing both would post
-    // two identical replies for every mention.  The `message` handler is
-    // therefore restricted to direct messages (channel_type === "im"), which
-    // never produce an `app_mention` event.
+    // Channel @mentions fire BOTH `app_mention` AND `message` — processing both
+    // would produce duplicate replies.  To avoid this:
+    //   - DMs (channel_type === "im"): always handled here (no app_mention fires)
+    //   - Channel messages starting with <@ (i.e. a mention): skipped here,
+    //     handled by app_mention above
+    //   - Channel messages starting with !save / !ask (no mention): handled here
+    //     so users don't need to @mention the bot for Second Brain commands
+    //   - All other channel messages: ignored
     this.client.on("message", async ({ event, ack }) => {
       await ack();
       const msg = event as SlackMessageEvent;
       // Ignore bot messages to prevent reply loops.
       if (msg.bot_id || msg.subtype === "bot_message") return;
-      // Only process DMs — channel @mentions are handled by app_mention above.
-      if (msg.channel_type !== "im") return;
-      await this._handleEvent(msg);
+
+      if (msg.channel_type === "im") {
+        // DM — full handling.
+        await this._handleEvent(msg);
+        return;
+      }
+
+      // Channel message — only intercept Second Brain commands without a mention.
+      if (this.brain) {
+        const text = String(msg.text ?? "").trim();
+        const isMention = text.startsWith("<@");
+        if (!isMention && (text.startsWith("!save ") || text.startsWith("!ask "))) {
+          await this._handleEvent(msg);
+        }
+      }
     });
 
     // reaction_added / reaction_removed
@@ -151,25 +166,25 @@ export class SlackHopper {
   // ── Core processing ────────────────────────────────────────────────────────
 
   private async _handleEvent(event: SlackMessageEvent): Promise<void> {
-    const text = String(event.text ?? "").trim();
+    const text = String(event.text ?? "").trim().replace(/^<@[A-Z0-9]+>\s*/, "");
 
     // ── Second Brain command interception ─────────────────────────────────
     if (this.brain && event.channel) {
-      // /save <url|text> — bookmark a URL or store a text note
-      if (text.startsWith("/save ")) {
+      // !save <url|text> — bookmark a URL or store a text note
+      if (text.startsWith("!save ")) {
         const arg = text.slice(6).trim();
         await this._handleSave(event, arg);
         return;
       }
 
-      // /ask <query> — query warm-tier notes
-      if (text.startsWith("/ask ")) {
+      // !ask <query> — query warm-tier notes
+      if (text.startsWith("!ask ")) {
         const query = text.slice(5).trim();
         await this._handleAsk(event, query);
         return;
       }
 
-      // Plain DMs (no /save or /ask prefix) fall through to normal triage.
+      // Plain DMs (no !save or !ask prefix) fall through to normal triage.
     }
 
     // ── Normal triage path ────────────────────────────────────────────────
@@ -232,7 +247,7 @@ export class SlackHopper {
   private async _handleSave(event: SlackMessageEvent, arg: string): Promise<void> {
     if (!this.brain || !event.channel) return;
     if (!arg) {
-      await this._postMessage(event, "_GristMill:_ Usage: `/save <url or text>`");
+      await this._postMessage(event, "_GristMill:_ Usage: `!save <url or text>`");
       return;
     }
 
@@ -269,7 +284,7 @@ export class SlackHopper {
   private async _handleAsk(event: SlackMessageEvent, query: string): Promise<void> {
     if (!this.brain || !event.channel) return;
     if (!query) {
-      await this._postMessage(event, "_GristMill:_ Usage: `/ask <your question>`");
+      await this._postMessage(event, "_GristMill:_ Usage: `!ask <your question>`");
       return;
     }
 

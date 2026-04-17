@@ -19,11 +19,19 @@ import { parse as parseYaml } from "yaml";
 
 // ── Types (matches grist-config IntegrationsConfig shape) ─────────────────────
 
+interface SecondBrainYamlConfig {
+  enabled?: boolean;
+  confidence_threshold?: number;
+  max_recall_limit?: number;
+  snippet_length?: number;
+}
+
 interface SlackYamlConfig {
   app_token?: string;
   bot_token?: string;
   signing_secret?: string;
   reply_mode?: string;
+  second_brain?: SecondBrainYamlConfig;
 }
 
 interface CronJobYaml {
@@ -66,6 +74,15 @@ interface GristMillYaml {
 
 // ── Resolved config shape ─────────────────────────────────────────────────────
 
+export interface SecondBrainSettings {
+  /** Minimum recall score before falling back to LLM. Default: 0.85 */
+  confidenceThreshold: number;
+  /** Max warm-tier notes retrieved per /ask query. Default: 5 */
+  maxRecallLimit: number;
+  /** Max chars per note snippet in Slack reply. Default: 400 */
+  snippetLength: number;
+}
+
 export interface SlackConfig {
   /** App-level token (xapp-…). Set via integrations.slack.app_token or SLACK_APP_TOKEN. */
   appToken: string;
@@ -75,6 +92,8 @@ export interface SlackConfig {
   signingSecret: string;
   /** "thread" | "off". Set via integrations.slack.reply_mode or SLACK_REPLY_MODE. Default: "thread". */
   replyMode: "thread" | "off";
+  /** null = disabled. Set via integrations.slack.second_brain.enabled: true */
+  secondBrain: SecondBrainSettings | null;
 }
 
 export interface HttpHopperSettings {
@@ -139,11 +158,21 @@ export function loadConfig(): GristMillTsConfig {
   const s = yaml.integrations?.slack ?? {};
 
   // Priority: env var > config.yaml > default
+  const sb = s.second_brain;
+  const secondBrainEnabled = sb?.enabled ?? false;
+
   const slack: SlackConfig = {
     appToken:      process.env["SLACK_APP_TOKEN"]      ?? s.app_token      ?? "",
     botToken:      process.env["SLACK_BOT_TOKEN"]      ?? s.bot_token      ?? "",
     signingSecret: process.env["SLACK_SIGNING_SECRET"] ?? s.signing_secret ?? "",
     replyMode:     _replyMode(process.env["SLACK_REPLY_MODE"] ?? s.reply_mode),
+    secondBrain: secondBrainEnabled
+      ? {
+          confidenceThreshold: sb?.confidence_threshold ?? 0.85,
+          maxRecallLimit:      sb?.max_recall_limit      ?? 5,
+          snippetLength:       sb?.snippet_length        ?? 400,
+        }
+      : null,
   };
 
   const pluginsDir =

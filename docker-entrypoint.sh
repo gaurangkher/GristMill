@@ -37,7 +37,9 @@ mkdir -p \
   /data/gristmill/feedback \
   /data/gristmill/plugins \
   /data/gristmill/checkpoints \
-  /data/gristmill/logs
+  /data/gristmill/logs \
+  /data/gristmill/db
+chown -R gristmill:gristmill /data/gristmill
 
 echo "[entrypoint] Config:  $CONFIG"
 echo "[entrypoint] Socket:  $SOCK"

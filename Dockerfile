@@ -96,6 +96,7 @@ RUN mkdir -p /data/gristmill/feedback \
              /data/gristmill/memory \
              /data/gristmill/checkpoints \
              /data/gristmill/plugins \
+             /data/gristmill/db \
     && chown -R gristmill:gristmill /app /data
 
 # NOTE: We intentionally do NOT set USER here.

@@ -1,0 +1,27 @@
+# GristMill — NVIDIA GPU overlay
+#
+# Passes an NVIDIA GPU into the Ollama container for hardware-accelerated
+# inference. Requires nvidia-container-toolkit on the host.
+#
+# Prerequisites:
+#   https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.nvidia.yml --profile ollama up -d
+#
+# To use a specific GPU (default: all):
+#   NVIDIA_VISIBLE_DEVICES=0 docker compose -f docker-compose.yml -f docker-compose.nvidia.yml --profile ollama up -d
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    environment:
+      NVIDIA_VISIBLE_DEVICES: "${NVIDIA_VISIBLE_DEVICES:-all}"
+      OLLAMA_KEEP_ALIVE: "5m"
