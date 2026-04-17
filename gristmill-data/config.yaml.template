@@ -169,11 +169,17 @@ integrations:
       enabled: true
       stale_days: 180              # suppress recall results older than N days
 
-  # Webhook hopper — receives signed webhooks from external services
-  # Endpoint: POST /webhooks/:channel
+  # Inbound hoppers
+  # HttpHopper  — POST /events (general event intake)       default: 3001
+  # WebhookHopper — POST /webhooks/:channel (HMAC-signed)  default: 3002
+  # These must be different ports. Do not set both to the same value.
   hoppers:
-    webhook:
+    http:
       port: 3001
+      host: "0.0.0.0"
+
+    webhook:
+      port: 3002
       channels:
         # Add one entry per external service that sends you webhooks.
         # Leave secret empty ("") to skip HMAC verification (local dev only).
