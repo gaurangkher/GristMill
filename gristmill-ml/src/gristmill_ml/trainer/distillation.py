@@ -94,7 +94,8 @@ class DistillationEngine:
         retention_records: list[dict],
         version: int,
         domain: str = "default",
-        max_steps: int = 500,
+        max_steps: Optional[int] = None,
+        num_epochs: int = 3,
         batch_size: int = 4,
         gradient_accumulation_steps: int = 4,
         learning_rate: float = 2e-4,
@@ -106,6 +107,11 @@ class DistillationEngine:
         Reads PENDING records for *domain* from *training_db_path*, mixes in
         *retention_records* for replay, trains a LoRA adapter, saves to a temp
         staging directory.
+
+        ``max_steps`` is computed from the actual dataset size and ``num_epochs``
+        when not explicitly provided, ensuring consistent training depth regardless
+        of how many records accumulated between cycles.  Pass ``max_steps``
+        explicitly only to override (e.g. in tests).
         """
         import time
 
@@ -141,12 +147,24 @@ class DistillationEngine:
             # ── Build mixed example list (with replay) ────────────────────────
             examples = _build_examples(pending, retention_records)
 
+            # ── Derive max_steps from dataset size if not explicitly set ──────
+            effective_batch = batch_size * gradient_accumulation_steps
+            steps_per_epoch = math.ceil(len(examples) / effective_batch)
+            resolved_max_steps = max_steps if max_steps is not None else steps_per_epoch * num_epochs
+            logger.info(
+                "Training schedule: %d examples, effective_batch=%d, "
+                "%d steps/epoch × %d epochs = %d steps",
+                len(examples), effective_batch, steps_per_epoch,
+                num_epochs if max_steps is None else 0,
+                resolved_max_steps,
+            )
+
             # ── LoRA training ─────────────────────────────────────────────────
             adapter_path, train_loss = self._train_lora(
                 examples=examples,
                 version=version,
                 domain=domain,
-                max_steps=max_steps,
+                max_steps=resolved_max_steps,
                 batch_size=batch_size,
                 gradient_accumulation_steps=gradient_accumulation_steps,
                 learning_rate=learning_rate,

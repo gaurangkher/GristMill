@@ -39,7 +39,16 @@ mkdir -p \
   /data/gristmill/checkpoints \
   /data/gristmill/logs \
   /data/gristmill/db
-chown -R gristmill:gristmill /data/gristmill
+# Chown each writable subdirectory individually — do NOT chown the parent
+# because config.yaml is bind-mounted read_only: true and chown would fail.
+chown -R gristmill:gristmill \
+  /data/gristmill/models \
+  /data/gristmill/memory \
+  /data/gristmill/feedback \
+  /data/gristmill/plugins \
+  /data/gristmill/checkpoints \
+  /data/gristmill/logs \
+  /data/gristmill/db
 
 echo "[entrypoint] Config:  $CONFIG"
 echo "[entrypoint] Socket:  $SOCK"

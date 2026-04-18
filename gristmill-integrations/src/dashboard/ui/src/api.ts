@@ -61,6 +61,9 @@ export interface TrainerStatus {
   buffer_pending_count: number;
   teacher_cost_usd_total: number;
   domains: Record<string, { version: number; validation_score: number; promoted_at: string }>;
+  student_model: string;
+  teacher_model: string;
+  commercial_llm: string;
 }
 
 export interface CycleSummary {
