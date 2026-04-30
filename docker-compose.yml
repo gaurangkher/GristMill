@@ -126,7 +126,7 @@ services:
     # Bootstrap is idempotent — skips download if models already exist
     command: >
       sh -c "pip install -e gristmill-ml -q &&
-             python gristmill-ml/scripts/bootstrap_models.py --no-quantize &&
+             python gristmill-ml/scripts/bootstrap_models.py --no-quantize --output-dir /data/gristmill/models &&
              gristmill-trainer"
     ports:
       - "${TRAINER_PORT:-7432}:7432"
@@ -153,6 +153,11 @@ services:
         source: ./gristmill-data/feedback
         target: /data/gristmill/feedback
         read_only: true
+
+      # ── Training buffer DB (shared with Rust daemon — trainer reads PENDING) ─
+      - type: bind
+        source: ./gristmill-data/db
+        target: /data/gristmill/db
 
       # ── Trainer IPC socket (Rust daemon connects here for hot-reload events) ─
       - gristmill_run:/gristmill/run
