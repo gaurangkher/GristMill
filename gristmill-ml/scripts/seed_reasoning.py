@@ -33,8 +33,14 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-DEFAULT_DB_PATH = Path.home() / ".gristmill" / "db" / "training_buffer.sqlite"
-FALLBACK_DB_PATH = Path("/data/gristmill/db/training_buffer.sqlite")
+# Repo-relative default: <repo-root>/gristmill-data/db/training_buffer.sqlite
+# Anchored on __file__ so it resolves correctly regardless of cwd.
+DEFAULT_DB_PATH = (
+    Path(__file__).resolve().parent.parent.parent
+    / "gristmill-data"
+    / "db"
+    / "training_buffer.sqlite"
+)
 DEFAULT_COUNT = 1_200
 DOMAIN_TAG = "reasoning"
 CONFIDENCE_SCORE = 0.95
@@ -227,15 +233,12 @@ def main() -> None:
     parser.add_argument(
         "--db-path",
         type=Path,
-        default=None,
-        help="Path to training_buffer.sqlite (default: ~/.gristmill/db/training_buffer.sqlite)",
+        default=DEFAULT_DB_PATH,
+        help="Path to training_buffer.sqlite (default: gristmill-data/db/training_buffer.sqlite relative to repo root)",
     )
     args = parser.parse_args()
 
-    db_path: Path = args.db_path or (
-        DEFAULT_DB_PATH if DEFAULT_DB_PATH.parent.exists() or not FALLBACK_DB_PATH.parent.exists()
-        else FALLBACK_DB_PATH
-    )
+    db_path: Path = args.db_path
     target: int = args.count
 
     print(f"DB path : {db_path}")
