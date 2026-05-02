@@ -150,11 +150,15 @@ class DistillationEngine:
             # ── Derive max_steps from dataset size if not explicitly set ──────
             effective_batch = batch_size * gradient_accumulation_steps
             steps_per_epoch = math.ceil(len(examples) / effective_batch)
-            resolved_max_steps = max_steps if max_steps is not None else steps_per_epoch * num_epochs
+            resolved_max_steps = (
+                max_steps if max_steps is not None else steps_per_epoch * num_epochs
+            )
             logger.info(
                 "Training schedule: %d examples, effective_batch=%d, "
                 "%d steps/epoch × %d epochs = %d steps",
-                len(examples), effective_batch, steps_per_epoch,
+                len(examples),
+                effective_batch,
+                steps_per_epoch,
                 num_epochs if max_steps is None else 0,
                 resolved_max_steps,
             )

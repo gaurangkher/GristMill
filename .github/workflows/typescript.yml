@@ -120,7 +120,7 @@ jobs:
           curl -sf -X POST http://127.0.0.1:3000/api/memory/recall \
             -H "Content-Type: application/json" \
             -d '{"query":"smoke test","limit":5}' | tee /tmp/recall.json
-          grep -q '"results"' /tmp/recall.json
+          grep -q '"score"' /tmp/recall.json
 
           kill $SERVER_PID
           echo "All smoke tests passed ✓"

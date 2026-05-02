@@ -483,8 +483,10 @@ class GristMillTrainerService:
         manifest = self.checkpoint_mgr.read_manifest()
         cfg = _load_gristmill_config()
         hammer = cfg.get("hammer", {})
-        teacher_model = (hammer.get("providers", {}).get("ollama", {}).get("model") or "unknown")
-        commercial_llm = (hammer.get("providers", {}).get("anthropic", {}).get("default_model") or "unknown")
+        teacher_model = hammer.get("providers", {}).get("ollama", {}).get("model") or "unknown"
+        commercial_llm = (
+            hammer.get("providers", {}).get("anthropic", {}).get("default_model") or "unknown"
+        )
         return {
             "state": self._state,
             "current_version": manifest.current_version if manifest else 0,
