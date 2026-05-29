@@ -7,20 +7,36 @@ Python ML package for GristMill. Handles all model training, fine-tuning, ONNX e
 ## Package Structure
 
 ```
-src/gristmill_ml/
-├── core.py              # PyO3 bridge re-export (+ pure-Python stubs)
-├── training/
-│   ├── sieve_trainer.py     # 4-class intent routing classifier
-│   ├── ner_trainer.py       # Named entity recognition (person/org/date/location)
-│   └── embedder_trainer.py  # Domain-specific sentence embedding fine-tuning
-├── datasets/
-│   ├── feedback.py          # Load Sieve feedback JSONL → PyTorch Dataset
-│   └── augmentation.py      # Synthetic data generation (back-translation, paraphrase)
-├── export/
-│   ├── onnx_export.py       # PyTorch → ONNX INT8 with validation
-│   └── validate.py          # Cross-runtime parity check (PyTorch vs ONNX vs Rust)
-└── experiments/
-    └── tracking.py          # MLflow / W&B experiment tracking helpers
+gristmill-ml/
+├── probes/                      # Named probe sets for reproducible evaluation
+│   └── reasoning.yaml           # 5 arithmetic/factual probes with expected answers
+├── results/                     # Saved JSON evaluation reports (gitignored)
+├── scripts/
+│   ├── seed_reasoning.py        # Bulk-seed training buffer from OpenHermes-2.5
+│   └── compare_lora_adapter.py  # CLI: compare base model vs. LoRA adapter
+└── src/gristmill_ml/
+    ├── core.py                  # PyO3 bridge re-export (+ pure-Python stubs)
+    ├── training/
+    │   ├── sieve_trainer.py         # 4-class intent routing classifier
+    │   ├── ner_trainer.py           # Named entity recognition
+    │   └── embedder_trainer.py      # Domain-specific sentence embedding fine-tuning
+    ├── trainer/                 # LoRA distillation pipeline
+    │   ├── service.py               # GristMillTrainerService — state machine + orchestrator
+    │   ├── distillation.py          # DistillationEngine — PEFT/TRL training loop
+    │   ├── checkpoint.py            # CheckpointManager — versioned adapter filesystem
+    │   ├── validation.py            # ValidationRunner — ROUGE-L promotion gate
+    │   ├── retention.py             # RetentionBuffer — experience replay records
+    │   └── ipc_server.py            # IPC/WebSocket event emission
+    ├── datasets/
+    │   ├── feedback.py              # Load Sieve feedback JSONL → PyTorch Dataset
+    │   └── augmentation.py          # Synthetic data generation
+    ├── export/
+    │   ├── onnx_export.py           # PyTorch → ONNX INT8 with validation
+    │   └── validate.py              # Cross-runtime parity check
+    └── experiments/
+        ├── adapter_eval.py          # AdapterEvaluator — base vs. LoRA comparison
+        ├── comparisons.py           # ONNX sieve model comparison framework
+        └── tracking.py              # MLflow / W&B experiment tracking helpers
 ```
 
 ## Installation
@@ -42,6 +58,9 @@ maturin develop --features python
 After `pip install -e .`:
 
 ```bash
+# Run the LoRA distillation trainer daemon
+gristmill-trainer
+
 # Train Sieve classifier from feedback logs
 gristmill-train-sieve [--epochs 5] [--lr 2e-5] [--output ~/.gristmill/models/sieve-v2.onnx]
 
@@ -167,6 +186,189 @@ print(f"Max absolute error: {report.max_abs_error}")
 print(f"Cosine similarity:  {report.cosine_similarity}")
 assert report.passes_threshold, "Parity check failed!"
 ```
+
+## LoRA Distillation Pipeline
+
+The `trainer/` subpackage implements a closed-loop LoRA distillation pipeline: a teacher LLM labels incoming queries, examples accumulate in a SQLite training buffer, the `DistillationEngine` fine-tunes a lightweight student model with PEFT/TRL, and validated adapters are hot-reloaded into the Rust daemon without service interruption.
+
+### Configuration
+
+All training hyperparameters and path overrides live in `config.yaml`:
+
+```yaml
+trainer:
+  base_model: Qwen/Qwen2.5-0.5B-Instruct
+  num_epochs: 1
+  learning_rate: 0.00005      # 5e-5 — conservative for small models
+  lora_rank: 16
+  lora_alpha: 16              # ratio 1× to limit update magnitude
+  lora_target_modules: "q_proj,v_proj"
+  replay_fraction: 0.30       # 30% of each batch from retention buffer
+  validation:
+    overall_delta_min: -0.05  # ROUGE-L delta gate for promotion
+    domain_delta_min: -0.08
+
+millwright:
+  checkpoint_dir: /path/to/gristmill-data/checkpoints/   # where adapters land
+```
+
+The trainer reads config from (in order): `$GRISTMILL_CONFIG`, `/data/gristmill/config.yaml` (Docker), `~/.gristmill/config.yaml` (host).
+
+### Running the trainer natively (Apple Silicon / host GPU)
+
+Docker containers on macOS cannot access Metal (MPS). Run the trainer directly on the host:
+
+```bash
+# From gristmill-ml/
+.ve/bin/gristmill-trainer
+```
+
+Point it at the shared SQLite buffer via `~/.gristmill/config.yaml`:
+
+```yaml
+sieve:
+  training_buffer_path: /absolute/path/to/gristmill-data/db/training_buffer.sqlite
+millwright:
+  checkpoint_dir: /absolute/path/to/gristmill-data/checkpoints/
+```
+
+### Seeding training data
+
+```bash
+python scripts/seed_reasoning.py   # loads ~2,400 examples from OpenHermes-2.5
+```
+
+### Known training issues and fixes
+
+See [`docs/lora-distillation-experiments.md`](../docs/lora-distillation-experiments.md) for a full catalogue of 12 engineering bugs encountered during bring-up, including:
+
+- PEFT + gradient checkpointing deadlock → requires `model.enable_input_require_grads()` and `use_reentrant=False`
+- Concurrent domain training OOM → global `threading.Lock()` over full load→train→save pipeline
+- Docker MPS inaccessibility → run trainer natively on host
+- ROUGE-L as misleading validation metric → factual accuracy probes
+
+---
+
+## Adapter Evaluation Framework
+
+The evaluation framework lets you compare a trained LoRA adapter against the base model on a reproducible set of named probe questions, with both ROUGE-L scoring and factual correctness checking.
+
+### Quick start
+
+```bash
+# Uses base model and checkpoint path from config.yaml automatically:
+python scripts/compare_lora_adapter.py
+
+# Explicit paths:
+python scripts/compare_lora_adapter.py \
+    --base-model Qwen/Qwen2.5-0.5B-Instruct \
+    --adapter gristmill-data/checkpoints/active/reasoning \
+    --domain reasoning \
+    --probe-set reasoning \
+    --output results/exp4-reasoning.json
+
+# Single ad-hoc question:
+python scripts/compare_lora_adapter.py \
+    --no-probe-set \
+    --question "A shop has 200 items. 15% are returned. How many remain?"
+```
+
+### CLI reference
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--base-model` | from `config.yaml` | HuggingFace model id or local path |
+| `--adapter` | `<checkpoint_root>/active/<domain>` | Path to PEFT adapter directory |
+| `--domain` | `reasoning` | Domain name for locating the adapter and labelling output |
+| `--probe-set` | `reasoning` | Probe set to load from `probes/<name>.yaml` |
+| `--question` | — | Extra ad-hoc question prepended to the probe set |
+| `--no-probe-set` | — | Disable probe set; use `--question` only |
+| `--max-new-tokens` | `256` | Max tokens to generate per response |
+| `--output` | — | Save JSON report to this path |
+| `--probes-dir` | `probes/` | Override probe set directory |
+
+### Probe sets
+
+Probe sets are YAML files in `probes/`. Each probe has:
+
+```yaml
+probes:
+  - id: february_leaves          # unique identifier
+    tags: [arithmetic, calendar_fact]
+    question: >
+      Every day, a tree drops 7 leaves...
+    expected: |
+      1. February has 28 days...
+    correct_answer: "196"        # substring checked in model output
+    notes: >
+      Experiment 1–3 primary probe...
+```
+
+**Current probe sets:**
+
+| File | Probes | Domain |
+|------|--------|--------|
+| `probes/reasoning.yaml` | 5 | Arithmetic and calendar-fact reasoning |
+
+Add a new probe set by creating `probes/<name>.yaml` following the same schema.
+
+### Programmatic usage
+
+```python
+from pathlib import Path
+from gristmill_ml.experiments.adapter_eval import AdapterEvaluator, load_probes
+
+probes = load_probes("reasoning")           # loads probes/reasoning.yaml
+evaluator = AdapterEvaluator(
+    base_model="Qwen/Qwen2.5-0.5B-Instruct",
+    adapter_path=Path("gristmill-data/checkpoints/active/reasoning"),
+    domain="reasoning",
+)
+report = evaluator.evaluate(probes, probe_set="reasoning")
+report.print_report()
+report.save(Path("results/exp4-reasoning.json"))
+
+# Access structured results
+for pr in report.probes:
+    print(f"{pr.probe_id}: base_correct={pr.base_correct}, adapter_correct={pr.adapter_correct}")
+print(f"ROUGE-L delta: {report.rouge_l_delta:+.4f}")
+print(f"Factual accuracy: base {report.base_correct_count}/{report.checkable_count}, "
+      f"adapter {report.adapter_correct_count}/{report.checkable_count}")
+```
+
+### Saved report format
+
+`report.save(path)` writes JSON with this shape:
+
+```json
+{
+  "base_model": "Qwen/Qwen2.5-0.5B-Instruct",
+  "adapter_path": "/path/to/active/reasoning",
+  "domain": "reasoning",
+  "probe_set": "reasoning",
+  "timestamp": "2026-05-29T22:00:00Z",
+  "mean_base_rouge_l": 0.312,
+  "mean_adapter_rouge_l": 0.198,
+  "rouge_l_delta": -0.114,
+  "base_correct_count": 5,
+  "adapter_correct_count": 2,
+  "checkable_count": 5,
+  "probes": [
+    {
+      "probe_id": "february_leaves",
+      "base_rouge_l": 0.28,
+      "adapter_rouge_l": 0.19,
+      "base_correct": true,
+      "adapter_correct": false,
+      ...
+    }
+  ]
+}
+```
+
+JSON files in `results/` are gitignored — commit the probe YAML files and the scripts, not the outputs.
+
+---
 
 ## Closed-Loop Retraining
 
