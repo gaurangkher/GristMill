@@ -214,38 +214,169 @@ millwright:
 
 The trainer reads config from (in order): `$GRISTMILL_CONFIG`, `/data/gristmill/config.yaml` (Docker), `~/.gristmill/config.yaml` (host).
 
-### Running the trainer natively (Apple Silicon / host GPU)
+### Running the trainer natively on macOS (Apple Silicon)
 
-Docker containers on macOS cannot access Metal (MPS). Run the trainer directly on the host:
+> **Why native instead of Docker?**
+> Docker on macOS runs containers inside a Linux VM (Apple Virtualization Framework). The VM has no access to the host's Metal GPU or MPS framework — every PyTorch operation falls back to CPU, making a typical 453-step LoRA training cycle take **15–38 hours**. Running the trainer directly on the macOS host gives access to MPS, reducing the same cycle to under an hour.
+
+#### Prerequisites
+
+| Requirement | Notes |
+|-------------|-------|
+| macOS 13 Ventura or later | Required for stable MPS support in PyTorch |
+| Python 3.11+ | 3.14 confirmed working; match the version in `.python-version` |
+| ~8 GB free disk | Model weights (0.5B ≈ 1 GB, 3B ≈ 6 GB) + adapter checkpoints |
+| ~6 GB free RAM | 0.5B model in bfloat16 during training; more for larger models |
+| Docker stack running | The rest of the system (Rust daemon, dashboard, Ollama) stays in Docker |
+
+#### Step 1 — Create a Python virtual environment
 
 ```bash
-# From gristmill-ml/
+cd gristmill-ml
+
+# Create venv (any name; .ve is the convention used in this repo)
+python3 -m venv .ve
+
+# Install the package and all ML dependencies
+.ve/bin/pip install -e ".[dev]"
+```
+
+> **First install downloads ~2–3 GB** of ML dependencies (PyTorch, Transformers, PEFT, TRL, datasets). This is a one-time cost.
+
+Confirm MPS is visible to PyTorch:
+
+```bash
+.ve/bin/python -c "import torch; print(torch.backends.mps.is_available())"
+# Expected: True
+```
+
+If you see `False`, update PyTorch: `.ve/bin/pip install --upgrade torch`.
+
+#### Step 2 — Configure `~/.gristmill/config.yaml`
+
+The host trainer reads `~/.gristmill/config.yaml` (not the Docker `gristmill-data/config.yaml`). Create or edit it with the following sections — adjust paths to match your checkout location:
+
+```yaml
+# ── Sieve ─────────────────────────────────────────────────────────────────────
+sieve:
+  confidence_threshold: 0.85
+  # Point at the shared SQLite buffer populated by the Docker stack:
+  training_buffer_path: /Users/<you>/GristMill/gristmill-data/db/training_buffer.sqlite
+
+# ── Trainer (LoRA distillation) ───────────────────────────────────────────────
+trainer:
+  base_model: Qwen/Qwen2.5-0.5B-Instruct   # ~1 GB; safe for MPS
+  num_epochs: 1
+  learning_rate: 0.00005
+  lora_rank: 16
+  lora_alpha: 16
+  lora_target_modules: "q_proj,v_proj"
+  replay_fraction: 0.30
+  validation:
+    overall_delta_min: -0.05
+    domain_delta_min: -0.08
+
+# ── Millwright ────────────────────────────────────────────────────────────────
+millwright:
+  checkpoint_dir: /Users/<you>/GristMill/gristmill-data/checkpoints/
+  # Adapters written here are also the path the Docker Rust daemon watches.
+```
+
+> **Use absolute paths**, not `~` shortcuts. The Python trainer expands `~` itself, but
+> absolute paths avoid edge cases when running as a background process.
+
+#### Step 3 — Tell Docker to use the host trainer
+
+The Docker stack has its own `trainer` container. When running the trainer natively, override the `TRAINER_URL` so the Rust daemon and dashboard talk to the host process instead of the container:
+
+Create (or edit) `.env` in the repo root:
+
+```bash
+# GristMill/.env
+TRAINER_URL=http://host.docker.internal:7432
+```
+
+Then (re)start the stack **without** the trainer container:
+
+```bash
+# From the repo root:
+docker compose up --scale trainer=0
+```
+
+#### Step 4 — Start the host trainer
+
+```bash
+cd gristmill-ml
 .ve/bin/gristmill-trainer
 ```
 
-Point it at the shared SQLite buffer via `~/.gristmill/config.yaml`:
+You should see output like:
 
-```yaml
-sieve:
-  training_buffer_path: /absolute/path/to/gristmill-data/db/training_buffer.sqlite
-millwright:
-  checkpoint_dir: /absolute/path/to/gristmill-data/checkpoints/
 ```
+INFO  gristmill_ml.trainer.service  GristMillTrainerService starting (state=IDLE)
+INFO  gristmill_ml.trainer.checkpoint  Checkpoint root: /Users/.../gristmill-data/checkpoints
+INFO  gristmill_ml.trainer.service  Training buffer: /Users/.../gristmill-data/db/training_buffer.sqlite
+INFO  gristmill_ml.trainer.service  Base model: Qwen/Qwen2.5-0.5B-Instruct
+INFO  gristmill_ml.trainer.service  Device: mps
+```
+
+If you see `device: cpu` instead of `mps`, check Step 1 — PyTorch MPS is not available.
+
+#### Step 5 — Seed training data (first run)
+
+The trainer triggers a cycle when 1,000+ PENDING records accumulate. Seed the buffer from OpenHermes-2.5:
+
+```bash
+.ve/bin/python scripts/seed_reasoning.py
+# Loads ~2,400 reasoning examples into the training buffer
+```
+
+Watch the trainer log — within 60 seconds of the buffer crossing 1,000 records it will begin loading the model and start training.
+
+#### Step 6 — Monitor progress
+
+- **Dashboard** — open `http://localhost:3000`, navigate to the Trainer tab. Cycle history, ROUGE-L scores, and promotion decisions are shown there.
+- **Trainer log** — the terminal running `gristmill-trainer` shows per-step loss.
+- **Checkpoint directory** — `gristmill-data/checkpoints/active/<domain>/` is populated when a cycle is promoted.
+
+#### Expected training times on Apple Silicon
+
+| Model | Steps | MPS time | CPU time (Docker) |
+|-------|-------|----------|-------------------|
+| Qwen2.5-0.5B | ~60 steps (2,400 examples, 1 epoch) | ~5–10 min | ~2–4 hours |
+| Qwen2.5-3B | ~60 steps | ~25–45 min | ~10–20 hours |
+
+Step count depends on dataset size: `steps = ceil(examples / effective_batch_size)` where `effective_batch_size = per_device_batch × gradient_accumulation_steps = 4 × 4 = 16`.
+
+#### Troubleshooting
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| `device: cpu` in logs | PyTorch MPS unavailable | `pip install --upgrade torch`; requires macOS 13+ |
+| `No PENDING records found` | Wrong DB path | Check `training_buffer_path` in `~/.gristmill/config.yaml`; run `seed_reasoning.py` |
+| Hangs at step 0 (929% CPU, no loss) | Gradient checkpointing deadlock | Already fixed in `distillation.py` via `enable_input_require_grads()` + `use_reentrant=False` |
+| `FileNotFoundError` on model load | Model not cached | First run downloads from HuggingFace; ensure internet access and ~1–6 GB free |
+| Dashboard shows `TRAINER_URL` error | Docker hitting container not host | Set `TRAINER_URL=http://host.docker.internal:7432` in `.env` and restart Docker stack |
+| Adapter rolled back immediately | ROUGE-L delta below threshold | Check `overall_delta_min` in config; default `-0.05` is already relaxed for 0.5B |
+| OOM during training | Model too large for available RAM | Switch to `Qwen/Qwen2.5-0.5B-Instruct`; reduce `lora_rank` or `batch_size` |
 
 ### Seeding training data
 
 ```bash
-python scripts/seed_reasoning.py   # loads ~2,400 examples from OpenHermes-2.5
+# Load ~2,400 reasoning examples from OpenHermes-2.5 into the training buffer:
+python scripts/seed_reasoning.py
 ```
+
+The script connects to the same SQLite buffer configured in `~/.gristmill/config.yaml`. Run it once before the first training cycle, or again to add more examples for subsequent cycles.
 
 ### Known training issues and fixes
 
 See [`docs/lora-distillation-experiments.md`](../docs/lora-distillation-experiments.md) for a full catalogue of 12 engineering bugs encountered during bring-up, including:
 
-- PEFT + gradient checkpointing deadlock → requires `model.enable_input_require_grads()` and `use_reentrant=False`
-- Concurrent domain training OOM → global `threading.Lock()` over full load→train→save pipeline
-- Docker MPS inaccessibility → run trainer natively on host
-- ROUGE-L as misleading validation metric → factual accuracy probes
+- **PEFT + gradient checkpointing deadlock** — requires `model.enable_input_require_grads()` and `gradient_checkpointing_kwargs={"use_reentrant": False}`
+- **Concurrent domain training OOM** — global `threading.Lock()` wraps the entire load→train→save pipeline
+- **Docker MPS inaccessibility** — run trainer natively on host (documented above)
+- **ROUGE-L as a misleading validation metric** — rewards surface-form mimicry over factual accuracy; see §6.2 and §6.6 of the experiments doc
 
 ---
 
