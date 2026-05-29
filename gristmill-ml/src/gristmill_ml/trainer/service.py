@@ -118,9 +118,9 @@ class GristMillTrainerService:
         import os
 
         self.training_db_path = training_db_path or _resolve_db_path()
-        self.base_model_name = base_model_name or os.environ.get(
-            "GRISTMILL_BASE_MODEL"
-        ) or _resolve_base_model()
+        self.base_model_name = (
+            base_model_name or os.environ.get("GRISTMILL_BASE_MODEL") or _resolve_base_model()
+        )
         self.inference_lock_path = inference_lock_path or _resolve_lock_path()
         self.status_file_path = status_file_path or _resolve_status_path()
         self.ipc_server = ipc_server or TrainerIpcServer()
@@ -770,7 +770,7 @@ def _resolve_base_model() -> str:
 
 def _resolve_train_hparams() -> dict:
     """Return LoRA training hyperparameters from config with safe defaults."""
-    t = (_load_gristmill_config().get("trainer") or {})
+    t = _load_gristmill_config().get("trainer") or {}
     hparams: dict = {}
     if "num_epochs" in t:
         hparams["num_epochs"] = int(t["num_epochs"])

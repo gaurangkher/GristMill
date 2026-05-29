@@ -180,9 +180,7 @@ class DistillationEngine:
             # ── LoRA training ─────────────────────────────────────────────────
             # Parse comma-separated target modules string if provided via config
             resolved_target_modules = (
-                [m.strip() for m in lora_target_modules.split(",")]
-                if lora_target_modules
-                else None
+                [m.strip() for m in lora_target_modules.split(",")] if lora_target_modules else None
             )
             adapter_path, train_loss = self._train_lora(
                 examples=examples,

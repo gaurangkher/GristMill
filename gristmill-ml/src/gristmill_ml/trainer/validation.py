@@ -93,7 +93,7 @@ class ValidationRunner:
 
         # Allow thresholds to be relaxed via config — useful for small models
         # where ROUGE-L variance is high and strict deltas cause false rollbacks.
-        _vcfg = (_load_validation_config() or {})
+        _vcfg = _load_validation_config() or {}
         self.overall_delta_min = float(_vcfg.get("overall_delta_min", OVERALL_DELTA_MIN))
         self.domain_delta_min = float(_vcfg.get("domain_delta_min", DOMAIN_DELTA_MIN))
 
