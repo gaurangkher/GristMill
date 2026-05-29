@@ -29,9 +29,44 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# Default checkpoint root; overridden by config / env.
-_DEFAULT_ROOT = Path("/gristmill/checkpoints")
+# Default checkpoint root — resolved in order:
+#   1. millwright.checkpoint_dir from config.yaml
+#   2. /data/gristmill/checkpoints  (Docker bind-mount, exists when inside container)
+#   3. ~/.gristmill/checkpoints     (local host install)
+_DOCKER_ROOT = Path("/data/gristmill/checkpoints")
 _FALLBACK_ROOT = Path.home() / ".gristmill" / "checkpoints"
+
+
+def _resolve_checkpoint_root() -> Path:
+    """Return the checkpoint root from config, falling back to Docker then host defaults."""
+    try:
+        import os
+
+        import yaml  # type: ignore[import]
+
+        candidates = []
+        if env_cfg := os.environ.get("GRISTMILL_CONFIG"):
+            candidates.append(Path(env_cfg))
+        candidates += [
+            Path("/data/gristmill/config.yaml"),
+            Path.home() / ".gristmill" / "config.yaml",
+        ]
+        for p in candidates:
+            if p.exists():
+                cfg = yaml.safe_load(p.read_text()) or {}
+                raw = (cfg.get("millwright") or {}).get("checkpoint_dir")
+                if raw:
+                    resolved = Path(str(raw).replace("~", str(Path.home())))
+                    logger.debug("Checkpoint root from config: %s", resolved)
+                    return resolved
+                break
+    except Exception:
+        pass
+    # No config entry — prefer Docker bind-mount if present, else host default.
+    if _DOCKER_ROOT.exists():
+        return _DOCKER_ROOT
+    return _FALLBACK_ROOT
+
 
 HISTORY_KEEP = 5  # Number of historical versions to retain
 
@@ -88,7 +123,7 @@ class CheckpointManager:
 
     def __init__(self, root: Optional[Path] = None) -> None:
         if root is None:
-            root = _DEFAULT_ROOT if _DEFAULT_ROOT.exists() else _FALLBACK_ROOT
+            root = _resolve_checkpoint_root()
         self.root = root
         self.active_dir = root / "active"
         self.staging_dir = root / "staging"
