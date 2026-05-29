@@ -67,7 +67,7 @@ export async function memoryRoutes(
     async (req, reply) => {
       const { query, limit = 10 } = req.body;
       const results = await bridge.recall(query, limit);
-      return reply.send({ results });
+      return reply.send(results);
     },
   );
 

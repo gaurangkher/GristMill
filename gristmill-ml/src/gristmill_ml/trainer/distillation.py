@@ -25,6 +25,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+import threading
+
+import torch
+from datasets import Dataset
+from peft import LoraConfig, TaskType, get_peft_model
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from trl import SFTConfig, SFTTrainer
+
+# Only one domain cycle may hold a model in memory at a time — two concurrent
+# 3B-param bfloat16 models exceed container RAM and trigger an OOM kill.
+_model_load_lock = threading.Lock()
+
 logger = logging.getLogger(__name__)
 
 # Replay fraction: 15–20 % of each effective batch comes from the retention buffer.
@@ -94,18 +106,26 @@ class DistillationEngine:
         retention_records: list[dict],
         version: int,
         domain: str = "default",
-        max_steps: int = 500,
+        max_steps: Optional[int] = None,
+        num_epochs: int = 3,
         batch_size: int = 4,
         gradient_accumulation_steps: int = 4,
         learning_rate: float = 2e-4,
         lora_rank: int = 16,
         lora_alpha: int = 32,
+        lora_target_modules: Optional[str] = None,
+        replay_fraction: float = REPLAY_FRACTION,
     ) -> CycleResult:
         """Execute a full distillation cycle and return the staged adapter path.
 
         Reads PENDING records for *domain* from *training_db_path*, mixes in
         *retention_records* for replay, trains a LoRA adapter, saves to a temp
         staging directory.
+
+        ``max_steps`` is computed from the actual dataset size and ``num_epochs``
+        when not explicitly provided, ensuring consistent training depth regardless
+        of how many records accumulated between cycles.  Pass ``max_steps``
+        explicitly only to override (e.g. in tests).
         """
         import time
 
@@ -139,19 +159,40 @@ class DistillationEngine:
             _mark_in_training(training_db_path, [r["record_id"] for r in pending])
 
             # ── Build mixed example list (with replay) ────────────────────────
-            examples = _build_examples(pending, retention_records)
+            examples = _build_examples(pending, retention_records, replay_fraction=replay_fraction)
+
+            # ── Derive max_steps from dataset size if not explicitly set ──────
+            effective_batch = batch_size * gradient_accumulation_steps
+            steps_per_epoch = math.ceil(len(examples) / effective_batch)
+            resolved_max_steps = (
+                max_steps if max_steps is not None else steps_per_epoch * num_epochs
+            )
+            logger.info(
+                "Training schedule: %d examples, effective_batch=%d, "
+                "%d steps/epoch × %d epochs = %d steps",
+                len(examples),
+                effective_batch,
+                steps_per_epoch,
+                num_epochs if max_steps is None else 0,
+                resolved_max_steps,
+            )
 
             # ── LoRA training ─────────────────────────────────────────────────
+            # Parse comma-separated target modules string if provided via config
+            resolved_target_modules = (
+                [m.strip() for m in lora_target_modules.split(",")] if lora_target_modules else None
+            )
             adapter_path, train_loss = self._train_lora(
                 examples=examples,
                 version=version,
                 domain=domain,
-                max_steps=max_steps,
+                max_steps=resolved_max_steps,
                 batch_size=batch_size,
                 gradient_accumulation_steps=gradient_accumulation_steps,
                 learning_rate=learning_rate,
                 lora_rank=lora_rank,
                 lora_alpha=lora_alpha,
+                lora_target_modules=resolved_target_modules,
             )
 
             # Mark records CONSUMED
@@ -194,83 +235,89 @@ class DistillationEngine:
         learning_rate: float = 2e-4,
         lora_rank: int = 16,
         lora_alpha: int = 32,
+        lora_target_modules: Optional[list[str]] = None,
     ) -> tuple[Path, float]:
         """Load base model, apply LoRA, run SFTTrainer, save adapter."""
-        import torch
-        from datasets import Dataset
-        from peft import LoraConfig, TaskType, get_peft_model
-        from transformers import AutoModelForCausalLM, AutoTokenizer
-        from trl import SFTConfig, SFTTrainer
-
         logger.info("Loading base model: %s (device=%s)", self.base_model_name, self.device)
         tokenizer = AutoTokenizer.from_pretrained(self.base_model_name, trust_remote_code=True)
         if tokenizer.pad_token is None:
             tokenizer.pad_token = tokenizer.eos_token
 
-        model = AutoModelForCausalLM.from_pretrained(
-            self.base_model_name,
-            torch_dtype=torch.bfloat16 if self.device != "cpu" else torch.float32,
-            device_map=self.device,
-            trust_remote_code=True,
-        )
+        from_pretrained_kwargs: dict = {
+            "torch_dtype": torch.bfloat16,
+            "trust_remote_code": True,
+        }
+        if self.device != "cpu":
+            from_pretrained_kwargs["device_map"] = self.device
 
-        # Apply LoRA
-        lora_config = LoraConfig(
-            task_type=TaskType.CAUSAL_LM,
-            r=lora_rank,
-            lora_alpha=lora_alpha,
-            lora_dropout=0.05,
-            bias="none",
-            target_modules=_target_modules(self.base_model_name),
-        )
-        model = get_peft_model(model, lora_config)
-        model.print_trainable_parameters()
-
-        # If we have a prior adapter, load it as a reference for functional distillation
-        if self.prior_adapter_path and self.prior_adapter_path.exists():
-            logger.info(
-                "Prior adapter available at %s — functional distillation enabled",
-                self.prior_adapter_path,
+        # Serialize the entire load→train→save pipeline so concurrent domain cycles
+        # never hold two 3B-param bfloat16 models in memory at the same time.
+        with _model_load_lock:
+            model = AutoModelForCausalLM.from_pretrained(
+                self.base_model_name, **from_pretrained_kwargs
             )
-            # Prior adapter penalty is applied implicitly: by mixing its outputs
-            # into the training set as retention data (handled by replay examples).
 
-        # Build HuggingFace dataset
-        formatted = [_format_example(ex, tokenizer) for ex in examples]
-        hf_dataset = Dataset.from_list([{"text": t} for t in formatted])
+            # Apply LoRA
+            lora_config = LoraConfig(
+                task_type=TaskType.CAUSAL_LM,
+                r=lora_rank,
+                lora_alpha=lora_alpha,
+                lora_dropout=0.05,
+                bias="none",
+                target_modules=lora_target_modules or _target_modules(self.base_model_name),
+            )
+            model = get_peft_model(model, lora_config)
+            model.enable_input_require_grads()
+            model.print_trainable_parameters()
 
-        output_path = self.output_dir / f"v{version}" / domain
-        output_path.mkdir(parents=True, exist_ok=True)
+            # If we have a prior adapter, load it as a reference for functional distillation
+            if self.prior_adapter_path and self.prior_adapter_path.exists():
+                logger.info(
+                    "Prior adapter available at %s — functional distillation enabled",
+                    self.prior_adapter_path,
+                )
+                # Prior adapter penalty is applied implicitly: by mixing its outputs
+                # into the training set as retention data (handled by replay examples).
 
-        sft_config = SFTConfig(
-            output_dir=str(output_path),
-            max_steps=max_steps,
-            per_device_train_batch_size=batch_size,
-            gradient_accumulation_steps=gradient_accumulation_steps,
-            learning_rate=learning_rate,
-            lr_scheduler_type="cosine",
-            warmup_ratio=0.05,
-            bf16=(self.device != "cpu"),
-            fp16=False,
-            logging_steps=10,
-            save_strategy="no",
-            report_to="none",
-            dataset_text_field="text",
-            max_seq_length=1024,
-        )
+            # Build HuggingFace dataset
+            formatted = [_format_example(ex, tokenizer) for ex in examples]
+            hf_dataset = Dataset.from_list([{"text": t} for t in formatted])
 
-        trainer = SFTTrainer(
-            model=model,
-            args=sft_config,
-            train_dataset=hf_dataset,
-        )
-        train_result = trainer.train()
-        train_loss = train_result.training_loss
+            output_path = self.output_dir / f"v{version}" / domain
+            output_path.mkdir(parents=True, exist_ok=True)
 
-        # Save only the LoRA adapter weights (not the full model)
-        model.save_pretrained(str(output_path))
-        tokenizer.save_pretrained(str(output_path))
-        logger.info("Adapter saved to %s (train_loss=%.4f)", output_path, train_loss)
+            sft_config = SFTConfig(
+                output_dir=str(output_path),
+                max_steps=max_steps,
+                per_device_train_batch_size=batch_size,
+                gradient_accumulation_steps=gradient_accumulation_steps,
+                learning_rate=learning_rate,
+                lr_scheduler_type="cosine",
+                warmup_ratio=0.05,
+                bf16=(self.device != "cpu"),
+                fp16=False,
+                logging_steps=10,
+                save_strategy="no",
+                report_to="none",
+                dataset_text_field="text",
+                max_length=512,
+                gradient_checkpointing=True,
+                gradient_checkpointing_kwargs={"use_reentrant": False},
+            )
+
+            trainer = SFTTrainer(
+                model=model,
+                args=sft_config,
+                train_dataset=hf_dataset,
+            )
+            train_result = trainer.train()
+            train_loss = train_result.training_loss
+
+            # Save only the LoRA adapter weights (not the full model)
+            model.save_pretrained(str(output_path))
+            tokenizer.save_pretrained(str(output_path))
+            logger.info("Adapter saved to %s (train_loss=%.4f)", output_path, train_loss)
+
         return output_path, train_loss
 
 
@@ -317,6 +364,7 @@ def _format_example(ex: _Example, tokenizer) -> str:
 def _build_examples(
     pending: list[dict],
     retention: list[dict],
+    replay_fraction: float = REPLAY_FRACTION,
 ) -> list[_Example]:
     """Merge pending + retention with the configured replay fraction."""
     main_examples = [
@@ -328,7 +376,7 @@ def _build_examples(
 
     # How many replay samples to inject?
     effective_batch = len(main_examples)
-    replay_count = math.ceil(effective_batch * REPLAY_FRACTION / (1 - REPLAY_FRACTION))
+    replay_count = math.ceil(effective_batch * replay_fraction / (1 - replay_fraction))
     replay_count = min(replay_count, len(retention))
 
     replay_sample = random.sample(retention, replay_count)

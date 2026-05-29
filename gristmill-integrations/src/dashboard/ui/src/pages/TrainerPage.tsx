@@ -233,6 +233,52 @@ export default function TrainerPage() {
         </div>
       )}
 
+      {/* Distillation pipeline */}
+      {status && (
+        <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius)", padding: 20 }}>
+          <div style={{ color: "var(--text-muted)", fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 16 }}>
+            Distillation Pipeline
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+
+            {/* Commercial LLM */}
+            <div style={{ flex: 1, minWidth: 140, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: "var(--radius)", padding: "12px 16px" }}>
+              <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-muted)", marginBottom: 6 }}>
+                Commercial LLM
+              </div>
+              <div style={{ fontWeight: 600, fontSize: 13, wordBreak: "break-all" }}>{status.commercial_llm}</div>
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>Escalation fallback</div>
+            </div>
+
+            <div style={{ color: "var(--text-muted)", fontSize: 18, userSelect: "none" }}>↓</div>
+
+            {/* Teacher */}
+            <div style={{ flex: 1, minWidth: 140, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: "var(--radius)", padding: "12px 16px" }}>
+              <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-muted)", marginBottom: 6 }}>
+                Teacher
+              </div>
+              <div style={{ fontWeight: 600, fontSize: 13, wordBreak: "break-all" }}>{status.teacher_model}</div>
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>Generates training data (Ollama)</div>
+            </div>
+
+            <div style={{ color: "var(--accent)", fontSize: 18, userSelect: "none", fontWeight: 700 }}>→</div>
+
+            {/* Student */}
+            <div style={{ flex: 1, minWidth: 140, background: "var(--bg)", border: "1px solid var(--accent)", borderRadius: "var(--radius)", padding: "12px 16px" }}>
+              <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--accent)", marginBottom: 6 }}>
+                Student
+              </div>
+              <div style={{ fontWeight: 600, fontSize: 13, wordBreak: "break-all" }}>{status.student_model}</div>
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>Being distilled · v{status.current_version}</div>
+            </div>
+
+          </div>
+          <div style={{ marginTop: 12, fontSize: 11, color: "var(--text-muted)" }}>
+            Teacher responses are logged to the training buffer → Student is fine-tuned via LoRA distillation. Commercial LLM is used only for low-confidence escalation and never enters the training buffer.
+          </div>
+        </div>
+      )}
+
       {/* Validation report */}
       <ValidationReport available={trainerAvailable} />
 

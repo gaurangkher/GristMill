@@ -39,7 +39,7 @@ from gristmill_ml.trainer.validation import ValidationResult, ValidationRunner
 logger = logging.getLogger(__name__)
 
 # Trigger thresholds
-PENDING_TRIGGER = 500
+PENDING_TRIGGER = 1000
 CYCLE_CADENCE_DAYS = 7
 
 # Resource gate
@@ -118,12 +118,13 @@ class GristMillTrainerService:
         import os
 
         self.training_db_path = training_db_path or _resolve_db_path()
-        self.base_model_name = base_model_name or os.environ.get(
-            "GRISTMILL_BASE_MODEL", "Qwen/Qwen2.5-3B-Instruct"
+        self.base_model_name = (
+            base_model_name or os.environ.get("GRISTMILL_BASE_MODEL") or _resolve_base_model()
         )
         self.inference_lock_path = inference_lock_path or _resolve_lock_path()
         self.status_file_path = status_file_path or _resolve_status_path()
         self.ipc_server = ipc_server or TrainerIpcServer()
+        self._train_hparams = _resolve_train_hparams()
 
         self.checkpoint_mgr = CheckpointManager(checkpoint_root)
         self.retention_buf = RetentionBuffer()
@@ -302,6 +303,7 @@ class GristMillTrainerService:
                     retention_records=retention_records,
                     version=cycle_version,
                     domain=domain,
+                    **self._train_hparams,
                 ),
             )
 
@@ -481,6 +483,12 @@ class GristMillTrainerService:
 
     def status_snapshot(self) -> dict[str, Any]:
         manifest = self.checkpoint_mgr.read_manifest()
+        cfg = _load_gristmill_config()
+        hammer = cfg.get("hammer", {})
+        teacher_model = hammer.get("providers", {}).get("ollama", {}).get("model") or "unknown"
+        commercial_llm = (
+            hammer.get("providers", {}).get("anthropic", {}).get("default_model") or "unknown"
+        )
         return {
             "state": self._state,
             "current_version": manifest.current_version if manifest else 0,
@@ -492,6 +500,9 @@ class GristMillTrainerService:
             "buffer_pending_count": self._count_pending(),
             "teacher_cost_usd_total": round(self._teacher_cost_usd_total, 6),
             "domains": manifest.domains if manifest else {},
+            "student_model": self.base_model_name,
+            "teacher_model": teacher_model,
+            "commercial_llm": commercial_llm,
         }
 
     def cost_summary(self) -> dict[str, Any]:
@@ -711,22 +722,80 @@ class GristMillTrainerService:
 # ── Path resolution helpers ───────────────────────────────────────────────────
 
 
+def _load_gristmill_config() -> dict:
+    """Return parsed config.yaml, or {} if none found.
+
+    Search order:
+      1. GRISTMILL_CONFIG env var
+      2. /data/gristmill/config.yaml  (Docker bind-mount)
+      3. ~/.gristmill/config.yaml     (local install)
+    """
+    import os
+
+    import yaml  # type: ignore[import]
+
+    candidates = []
+    if env_cfg := os.environ.get("GRISTMILL_CONFIG"):
+        candidates.append(Path(env_cfg))
+    candidates += [
+        Path("/data/gristmill/config.yaml"),
+        Path.home() / ".gristmill" / "config.yaml",
+    ]
+    for p in candidates:
+        if p.exists():
+            try:
+                return yaml.safe_load(p.read_text()) or {}
+            except Exception:
+                logger.warning("Could not parse config at %s", p)
+            break
+    return {}
+
+
 def _resolve_db_path() -> Path:
-    default = Path("/gristmill/db/training_buffer.sqlite")
+    cfg = _load_gristmill_config()
+    db_str = (cfg.get("sieve") or {}).get("training_buffer_path")
+    if db_str:
+        return Path(db_str)
+    default = Path("/data/gristmill/db/training_buffer.sqlite")
     if default.parent.exists():
         return default
     return Path.home() / ".gristmill" / "db" / "training_buffer.sqlite"
 
 
+def _resolve_base_model() -> str:
+    """Return the student base model name from config, falling back to the default."""
+    cfg = _load_gristmill_config()
+    return (cfg.get("trainer") or {}).get("base_model", "Qwen/Qwen2.5-3B-Instruct")
+
+
+def _resolve_train_hparams() -> dict:
+    """Return LoRA training hyperparameters from config with safe defaults."""
+    t = _load_gristmill_config().get("trainer") or {}
+    hparams: dict = {}
+    if "num_epochs" in t:
+        hparams["num_epochs"] = int(t["num_epochs"])
+    if "learning_rate" in t:
+        hparams["learning_rate"] = float(t["learning_rate"])
+    if "lora_rank" in t:
+        hparams["lora_rank"] = int(t["lora_rank"])
+    if "lora_alpha" in t:
+        hparams["lora_alpha"] = int(t["lora_alpha"])
+    if "lora_target_modules" in t:
+        hparams["lora_target_modules"] = str(t["lora_target_modules"])
+    if "replay_fraction" in t:
+        hparams["replay_fraction"] = float(t["replay_fraction"])
+    return hparams
+
+
 def _resolve_lock_path() -> Path:
-    default = Path("/gristmill/run/inference.lock")
+    default = Path("/data/gristmill/run/inference.lock")
     if default.parent.exists():
         return default
     return Path.home() / ".gristmill" / "run" / "inference.lock"
 
 
 def _resolve_status_path() -> Path:
-    default = Path("/gristmill/run/trainer.status")
+    default = Path("/data/gristmill/run/trainer.status")
     if default.parent.exists():
         return default
     return Path.home() / ".gristmill" / "run" / "trainer.status"

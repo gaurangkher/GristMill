@@ -168,9 +168,8 @@ jobs:
           echo "$RESP" | python3 -c "
           import json, sys
           d = json.load(sys.stdin)
-          assert 'results' in d, f'expected results field, got: {d}'
-          assert isinstance(d['results'], list), 'results must be an array'
-          print(f\"PASS: recall returned {len(d['results'])} result(s)\")
+          assert isinstance(d, list), f'expected array response, got: {type(d).__name__}: {d}'
+          print(f\"PASS: recall returned {len(d)} result(s)\")
           "
 
       - name: Memory get by id
