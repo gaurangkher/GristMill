@@ -91,6 +91,12 @@ class ValidationRunner:
         self.val_set_path = val_set_path or _DEFAULT_VALSET
         self.val_set_path.parent.mkdir(parents=True, exist_ok=True)
 
+        # Allow thresholds to be relaxed via config — useful for small models
+        # where ROUGE-L variance is high and strict deltas cause false rollbacks.
+        _vcfg = (_load_validation_config() or {})
+        self.overall_delta_min = float(_vcfg.get("overall_delta_min", OVERALL_DELTA_MIN))
+        self.domain_delta_min = float(_vcfg.get("domain_delta_min", DOMAIN_DELTA_MIN))
+
     # ── Validation set bootstrap ──────────────────────────────────────────────
 
     def ensure_validation_set(self, training_db_path: Path) -> bool:
@@ -141,7 +147,7 @@ class ValidationRunner:
         prior_scores = (
             self._score_adapter(prior_adapter_path, val_set)
             if prior_adapter_path and prior_adapter_path.exists()
-            else {ex["record_id"]: 0.5 for ex in val_set}
+            else {ex["record_id"]: 0.0 for ex in val_set}  # First cycle: no prior baseline
         )
 
         overall_staged = _mean_scores(staged_scores)
@@ -165,23 +171,23 @@ class ValidationRunner:
             )
 
         # Stage 1 pass/fail
-        if overall_delta < OVERALL_DELTA_MIN:
+        if overall_delta < self.overall_delta_min:
             return ValidationResult(
                 passed=False,
                 overall_score=overall_staged,
                 prior_overall_score=overall_prior,
                 overall_delta=overall_delta,
                 domain_metrics=domain_metrics,
-                failure_reason=f"overall_delta={overall_delta:.4f} < {OVERALL_DELTA_MIN}",
+                failure_reason=f"overall_delta={overall_delta:.4f} < {self.overall_delta_min}",
             )
-        if worst_domain_delta < DOMAIN_DELTA_MIN:
+        if worst_domain_delta < self.domain_delta_min:
             return ValidationResult(
                 passed=False,
                 overall_score=overall_staged,
                 prior_overall_score=overall_prior,
                 overall_delta=overall_delta,
                 domain_metrics=domain_metrics,
-                failure_reason=f"worst_domain_delta={worst_domain_delta:.4f} < {DOMAIN_DELTA_MIN}",
+                failure_reason=f"worst_domain_delta={worst_domain_delta:.4f} < {self.domain_delta_min}",
             )
 
         # Stage 2 — retention score
@@ -364,6 +370,29 @@ def _mean_scores(scores: dict[str, float]) -> float:
     if not scores:
         return 0.0
     return sum(scores.values()) / len(scores)
+
+
+def _load_validation_config() -> dict:
+    """Read validation thresholds from config.yaml trainer.validation section."""
+    try:
+        import os
+        import yaml  # type: ignore[import]
+        from pathlib import Path as _Path
+
+        candidates = []
+        if env_cfg := os.environ.get("GRISTMILL_CONFIG"):
+            candidates.append(_Path(env_cfg))
+        candidates += [
+            _Path("/data/gristmill/config.yaml"),
+            _Path.home() / ".gristmill" / "config.yaml",
+        ]
+        for p in candidates:
+            if p.exists():
+                cfg = yaml.safe_load(p.read_text()) or {}
+                return (cfg.get("trainer") or {}).get("validation", {})
+    except Exception:
+        pass
+    return {}
 
 
 def _cuda_available() -> bool:

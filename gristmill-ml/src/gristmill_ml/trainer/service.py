@@ -119,11 +119,12 @@ class GristMillTrainerService:
 
         self.training_db_path = training_db_path or _resolve_db_path()
         self.base_model_name = base_model_name or os.environ.get(
-            "GRISTMILL_BASE_MODEL", "Qwen/Qwen2.5-3B-Instruct"
-        )
+            "GRISTMILL_BASE_MODEL"
+        ) or _resolve_base_model()
         self.inference_lock_path = inference_lock_path or _resolve_lock_path()
         self.status_file_path = status_file_path or _resolve_status_path()
         self.ipc_server = ipc_server or TrainerIpcServer()
+        self._train_hparams = _resolve_train_hparams()
 
         self.checkpoint_mgr = CheckpointManager(checkpoint_root)
         self.retention_buf = RetentionBuffer()
@@ -302,6 +303,7 @@ class GristMillTrainerService:
                     retention_records=retention_records,
                     version=cycle_version,
                     domain=domain,
+                    **self._train_hparams,
                 ),
             )
 
@@ -758,6 +760,31 @@ def _resolve_db_path() -> Path:
     if default.parent.exists():
         return default
     return Path.home() / ".gristmill" / "db" / "training_buffer.sqlite"
+
+
+def _resolve_base_model() -> str:
+    """Return the student base model name from config, falling back to the default."""
+    cfg = _load_gristmill_config()
+    return (cfg.get("trainer") or {}).get("base_model", "Qwen/Qwen2.5-3B-Instruct")
+
+
+def _resolve_train_hparams() -> dict:
+    """Return LoRA training hyperparameters from config with safe defaults."""
+    t = (_load_gristmill_config().get("trainer") or {})
+    hparams: dict = {}
+    if "num_epochs" in t:
+        hparams["num_epochs"] = int(t["num_epochs"])
+    if "learning_rate" in t:
+        hparams["learning_rate"] = float(t["learning_rate"])
+    if "lora_rank" in t:
+        hparams["lora_rank"] = int(t["lora_rank"])
+    if "lora_alpha" in t:
+        hparams["lora_alpha"] = int(t["lora_alpha"])
+    if "lora_target_modules" in t:
+        hparams["lora_target_modules"] = str(t["lora_target_modules"])
+    if "replay_fraction" in t:
+        hparams["replay_fraction"] = float(t["replay_fraction"])
+    return hparams
 
 
 def _resolve_lock_path() -> Path:

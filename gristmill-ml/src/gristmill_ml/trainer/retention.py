@@ -112,7 +112,7 @@ class RetentionBuffer:
         self._conn.execute("DELETE FROM retention_records")
         self._conn.executemany(
             """
-            INSERT INTO retention_records
+            INSERT OR IGNORE INTO retention_records
                 (record_id, timestamp, query_text, teacher_response,
                  grinder_response, confidence_score, domain_tag, quality_score, selected_at)
             VALUES (?,?,?,?,?,?,?,?,?)

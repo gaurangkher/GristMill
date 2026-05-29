@@ -27,7 +27,7 @@ dependencies = [
     "seqeval>=1.2",
     # Phase 2 — distillation trainer
     "peft>=0.10",
-    "trl>=0.8",
+    "trl>=0.8.1",
     "fastapi>=0.111",
     "uvicorn[standard]>=0.29",
     # Phase 3 — Second Brain processor
