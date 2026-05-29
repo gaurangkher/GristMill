@@ -126,7 +126,7 @@ class GristMillTrainerService:
         self.ipc_server = ipc_server or TrainerIpcServer()
         self._train_hparams = _resolve_train_hparams()
 
-        self.checkpoint_mgr = CheckpointManager(checkpoint_root)
+        self.checkpoint_mgr = CheckpointManager(checkpoint_root or _resolve_checkpoint_root())
         self.retention_buf = RetentionBuffer()
         self.validation_runner = ValidationRunner(base_model_name=self.base_model_name)
 
@@ -294,6 +294,7 @@ class GristMillTrainerService:
             prior_adapter = self.checkpoint_mgr.active_adapter_path(domain=domain)
             engine = DistillationEngine(
                 base_model_name=self.base_model_name,
+                output_dir=self.checkpoint_mgr.root / "tmp",
                 prior_adapter_path=prior_adapter,
             )
             cycle_result = await loop.run_in_executor(
@@ -785,6 +786,13 @@ def _resolve_train_hparams() -> dict:
     if "replay_fraction" in t:
         hparams["replay_fraction"] = float(t["replay_fraction"])
     return hparams
+
+
+def _resolve_checkpoint_root() -> Path:
+    """Return checkpoint root from millwright.checkpoint_dir in config."""
+    from gristmill_ml.trainer.checkpoint import _resolve_checkpoint_root as _cp_root
+
+    return _cp_root()
 
 
 def _resolve_lock_path() -> Path:
