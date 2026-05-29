@@ -1,0 +1,76 @@
+name: reasoning
+description: >
+  Multi-step arithmetic and factual reasoning probes used to evaluate LoRA adapter
+  quality against the base model. Each probe has a known correct answer so results
+  can be assessed for factual accuracy, not just ROUGE-L surface overlap.
+
+  These probes were used in the distillation experiments documented in
+  docs/lora-distillation-experiments.md.
+
+probes:
+  - id: february_leaves
+    tags: [arithmetic, calendar_fact]
+    question: >
+      Every day, a tree drops 7 leaves. How many leaves would it drop in a month
+      of February in a non-leap year? Include your logic.
+    expected: |
+      1. February has 28 days in a non-leap year.
+      2. Leaves dropped = 7 leaves/day * 28 days = 196 leaves
+    correct_answer: "196"
+    notes: >
+      Primary probe from Experiments 1–3. Tests whether the model retains the
+      factual knowledge that February has 28 days. Both LoRA adapters answered
+      incorrectly (217 and 210 leaves respectively) while the base model answered
+      correctly (196 leaves).
+
+  - id: days_in_year
+    tags: [arithmetic, calendar_fact]
+    question: >
+      A factory produces 12 widgets per day. How many widgets does it produce in
+      a standard (non-leap) year? Show your working.
+    expected: |
+      1. A standard year has 365 days.
+      2. Widgets produced = 12 widgets/day * 365 days = 4380 widgets
+    correct_answer: "4380"
+    notes: >
+      Tests retention of basic calendar fact (365 days/year) under a similar
+      arithmetic structure to the primary probe.
+
+  - id: simple_percentage
+    tags: [arithmetic, percentage]
+    question: >
+      A store has 240 items in stock. If 15% are returned by customers, how many
+      items remain? Show your reasoning step by step.
+    expected: |
+      1. Items returned = 15% of 240 = 0.15 * 240 = 36 items
+      2. Items remaining = 240 - 36 = 204 items
+    correct_answer: "204"
+    notes: >
+      Percentage arithmetic probe with no domain-specific factual knowledge
+      required — tests pure arithmetic without calendar facts.
+
+  - id: unit_conversion
+    tags: [arithmetic, unit_conversion]
+    question: >
+      A car travels at 60 miles per hour. How far does it travel in 2 hours and
+      30 minutes? Show each step.
+    expected: |
+      1. Convert time: 2 hours 30 minutes = 2.5 hours
+      2. Distance = speed * time = 60 mph * 2.5 hours = 150 miles
+    correct_answer: "150"
+    notes: >
+      Unit conversion + arithmetic. Tests whether the model correctly converts
+      30 minutes to 0.5 hours before multiplying.
+
+  - id: multi_step_word_problem
+    tags: [arithmetic, multi_step]
+    question: >
+      A bakery makes 3 batches of cookies per day. Each batch contains 48 cookies.
+      If they sell 80% of their daily production, how many cookies are sold each day?
+    expected: |
+      1. Total cookies per day = 3 batches * 48 cookies/batch = 144 cookies
+      2. Cookies sold = 80% of 144 = 0.80 * 144 = 115.2 ≈ 115 cookies
+    correct_answer: "115"
+    notes: >
+      Two-step problem requiring multiplication then percentage. Tests chained
+      reasoning without domain-specific factual knowledge.
