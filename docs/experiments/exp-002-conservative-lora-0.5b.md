@@ -110,13 +110,15 @@ The promotion system therefore rolled back the less-wrong adapter and retained t
 
 ### 4.2 Why Forgetting Persists
 
-Even at 24× lower effective gradient magnitude than EXP-001, the 0.5B model continues to exhibit forgetting. Three structural factors explain this:
+Even at 24× lower effective gradient magnitude than EXP-001, the 0.5B model continues to exhibit forgetting. Four structural factors explain this:
 
 **Capacity**: The 0.5B model has 494M parameters distributed across 24 attention layers. Its pre-training factual knowledge is encoded in a compact representational space. Even small LoRA updates to q_proj and v_proj — the attention components most involved in pattern-matching over context — are sufficient to disrupt the key-value lookup patterns that retrieve "February → 28 days."
 
 **Data distribution**: 2,405 training examples follow a stereotyped format (numbered steps, arithmetic chain, "Final answer: X"). This format is out-of-distribution relative to the model's instruction-tuning pre-training. The model cannot learn a "reasoning style" separate from the numerical facts in those examples — the two are entangled in the gradient signal.
 
 **Rehearsal fraction**: Even with replay_fraction = 0.30, the model does not re-encounter any probe-equivalent example during training. The February leaves problem is not in the training data. The model must generalize from "compute N × M for various N, M" to "compute 28 × 7" — but LoRA cannot separate the general skill from the specific numerical facts entangled with it in 2,405 examples.
+
+**Dataset diversity** (root cause, identified post-hoc): OpenHermes-2.5 mixes math, code, creative writing, roleplay, and trivia. The reasoning-style gradient signal is diluted across unrelated task types, meaning each math example has to compete with structurally dissimilar examples for the model's representational capacity. EXP-004 replaces OpenHermes-2.5 with **MetaMathQA** (`meta-math/MetaMathQA`) — a focused dataset where every example is a quantitative word problem with 4–6 reformulations of the same core problem. This directly addresses the memorization-vs-generalization failure described in §4.2.
 
 ### 4.3 Why Published LoRA Results Do Not Transfer Here
 

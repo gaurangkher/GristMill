@@ -79,25 +79,74 @@ The full encoder is fine-tuned (no adapter — at 183M parameters, full fine-tun
 
 ### 3.2 Training Data
 
-Three sources, combined:
+Three layers, combined into a single training set:
 
-**1. Domain-specific labeled examples** (primary):
-- Infrastructure alerts: "CPU at 95%", "memory pressure detected", "disk full" → negative
-- Normal operational status: "service healthy", "deployment complete" → positive / neutral
-- User queries: "how do I restart X", "what is the SLA for Y" → neutral
-- Error reports: "connection refused", "timeout after 30s", "build failed" → negative
+#### Layer 1: General Foundation (regularization, ~20% of total)
 
-Target: ≥ 500 domain-labeled examples per class (1,500 total minimum).
+Prevents catastrophic forgetting of general sentiment understanding. Sample from one or two of these:
 
-**2. General sentiment data** (regularization):
-- SST-2 or similar open-domain dataset, sampled to ~20% of domain data
-- Prevents catastrophic forgetting of general sentiment understanding
+| Dataset | HF ID | Size | Why it fits |
+|---------|-------|------|------------|
+| **SST-2** *(primary)* | `stanfordnlp/sst2` | 67K | The canonical sentiment benchmark. Binary (positive/negative). Use a 10K sample. |
+| **DynaSent** | `dynabench/dynasentiment` | 121K | Adversarially collected — examples specifically designed to fool existing models. Directly improves robustness on edge cases. |
+| **Twitter Financial News Sentiment** | `zeroshot/twitter-financial-news-sentiment` | 11K | Professional/technical register ("Q3 earnings declined 12%"). Much closer to infrastructure language than movie reviews. Use all 11K. |
 
-**3. Adversarial examples** (critical path):
-- Examples specifically designed to fool general models:
-  - "Latency improved to 200ms" → neutral (improvement), not "positive"
-  - "Error rate dropped to 0.1%" → positive
-  - "99th percentile at 4.8ms" → positive (below 5ms target)
+```python
+from datasets import load_dataset
+
+sst2 = load_dataset("stanfordnlp/sst2", split="train").shuffle(seed=42).select(range(10000))
+dynasent = load_dataset("dynabench/dynasentiment", split="train")
+fin_news = load_dataset("zeroshot/twitter-financial-news-sentiment", split="train")
+```
+
+> **Why Twitter Financial News over IMDb/Amazon reviews**: Infrastructure alerts use professional, terse language ("P99 latency at 4.8ms", "disk at 90%") that is closer to financial news than consumer product reviews. The financial dataset also contains adversarial cases where large numbers are negative ("earnings missed by 12%").
+
+#### Layer 2: Domain-Specific Labeled Examples (primary, ~55% of total)
+
+No suitable public dataset covers infrastructure sentiment. Generate these from GristMill's own query logs and seed templates:
+
+- Infrastructure alerts: "CPU at 95%", "memory pressure detected", "disk full" → `negative`
+- Normal operational status: "service healthy", "deployment complete" → `positive`
+- User queries: "how do I restart X", "what is the SLA for Y" → `neutral`
+- Error reports: "connection refused", "timeout after 30s", "build failed" → `negative`
+
+Target: ≥ 500 labeled examples per class (1,500 total minimum). Use the teacher LLM to generate variants of seed examples:
+
+```python
+SEED_EXAMPLES = [
+    ("Disk at 90% capacity on primary node.", "negative"),
+    ("Deployment completed in 4m 32s.", "positive"),
+    ("What is the session timeout value?", "neutral"),
+    ("OOMKilled: container exceeded 8Gi.", "negative"),
+    ("CPU idle at 65%.", "positive"),
+    ("P99 latency spiked to 2.3s.", "negative"),
+    ("How do I check the service status?", "neutral"),
+    ("Memory usage stable at 4.2 GB.", "positive"),
+    ("Connection refused on port 5432.", "negative"),
+]
+# Use teacher LLM to generate 50+ variants of each seed example
+```
+
+#### Layer 3: Adversarial Examples (critical path, ~25% of total)
+
+These target the specific failure modes of general-purpose sentiment models on technical language:
+
+- "Latency improved to 200ms" → `neutral` (improvement, but absolute value is high)
+- "Error rate dropped to 0.1%" → `positive`
+- "99th percentile at 4.8ms" → `positive` (below 5ms target)
+- "Disk at 90% capacity" → `negative` (general models see "90%" as high = good)
+- "Service uptime: 99.2%" → `positive`
+- "3 alerts fired in the last hour" → `negative`
+
+Target: ≥ 150 adversarial examples. At least 15 of these should also appear in `probes/sentiment.yaml` as the probe set's adversarial subset.
+
+**Combined training mix**:
+
+| Source | Records | Fraction |
+|--------|---------|----------|
+| General (SST-2 + Financial News + DynaSent) | ~21K | 20% |
+| Domain-specific labeled | 1,500 | 55% |
+| Adversarial | 150 | 25% |
 
 ### 3.3 Probe Set
 

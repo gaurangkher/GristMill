@@ -59,7 +59,41 @@ Replacing Qwen2.5-0.5B-Instruct with Qwen2.5-1.5B-Instruct as the student model,
 | Estimated MPS VRAM | ~1 GB | **~3.5 GB** | |
 | Estimated training time (MPS, 2,400 examples) | ~45 min | **~2.5 hours** | |
 
-### 3.3 Config Changes
+### 3.3 Training Dataset
+
+**Current dataset** (EXP-001–003): OpenHermes-2.5, a 1M-example general instruction dataset covering math, code, creative writing, roleplay, and trivia. The diversity is the problem — the model receives too weak a per-domain gradient signal to learn reasoning patterns without overfitting to surface form.
+
+**Recommended replacement**: Replace the OpenHermes-2.5 seed with a focused math reasoning dataset. Update `scripts/seed_reasoning.py` to pull from one of these instead:
+
+| Dataset | HF ID | Size | Why it fits |
+|---------|-------|------|------------|
+| **MetaMathQA** *(primary)* | `meta-math/MetaMathQA` | 395K | Each problem is reformulated 4–6 ways (different wording, same answer). Directly trains generalization over memorization. Best single choice for EXP-004. |
+| **Orca-Math** | `microsoft/orca-math-word-problems-200k` | 200K | GPT-4-generated math word problems with full step-by-step solutions. Clean, structured, high-variety. |
+| **WizardMath** | `WizardLMTeam/WizardMath_Data_With_CoT` | 96K | Augmented from GSM8K with CoT solutions. More concise than NuminaMath, well-suited to 1.5B. |
+
+> **Do not use GSM8K as training data** — it is the canonical reasoning benchmark. Including it creates eval contamination.
+
+**Recommended training sample**: MetaMathQA (5,000 examples) + Orca-Math (3,000 examples), filtered to rows with a clean numeric final answer:
+
+```python
+from datasets import load_dataset
+import re
+
+dataset = load_dataset("meta-math/MetaMathQA", split="train")
+filtered = dataset.filter(
+    lambda x: re.search(r'\d', x["response"])
+              and len(x["query"]) > 50
+              and not re.search(r"```|import |def ", x["query"])
+)
+# Shuffle and take 5,000
+sample = filtered.shuffle(seed=42).select(range(5000))
+```
+
+Seed into the training buffer via `scripts/seed_reasoning.py --source metamath --n 5000`.
+
+> **Key benefit of MetaMathQA's reformulations**: the model sees the same core problem stated 4–6 different ways. This is what drives generalization rather than surface memorization — the failure mode in EXP-001/002.
+
+### 3.4 Config Changes
 
 In `~/.gristmill/config.yaml`:
 ```yaml
@@ -82,7 +116,7 @@ trainer:
 
 > Note: MPS batch_size is automatically overridden to 1 by `DistillationEngine._train_lora()` for MPS devices. gradient_accumulation_steps is auto-adjusted to maintain effective_batch = batch_size × gradient_accumulation_steps.
 
-### 3.4 Evaluation Protocol
+### 3.5 Evaluation Protocol
 
 **Pre-training baseline**: Run `compare_lora_adapter.py` with no active adapter to record base 1.5B model performance.
 
@@ -104,7 +138,7 @@ python scripts/compare_lora_adapter.py --probe-set training_reasoning --max-new-
 
 **Qualitative probe**: Same February leaves question used across all experiments for cross-experiment comparability.
 
-### 3.5 Success Criteria
+### 3.6 Success Criteria
 
 | Criterion | Target | Priority |
 |-----------|--------|----------|
