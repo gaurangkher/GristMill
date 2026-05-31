@@ -286,11 +286,19 @@ class DistillationEngine:
             output_path = self.output_dir / f"v{version}" / domain
             output_path.mkdir(parents=True, exist_ok=True)
 
+            # On MPS the physical batch size drives peak activation memory.
+            # We keep the *effective* batch size (batch × grad_accum) constant
+            # by scaling gradient_accumulation_steps to compensate, so training
+            # dynamics are unchanged.
+            effective_batch = batch_size * gradient_accumulation_steps
+            mps_batch_size = 1 if self.device == "mps" else batch_size
+            mps_grad_accum = effective_batch // mps_batch_size
+
             sft_config = SFTConfig(
                 output_dir=str(output_path),
                 max_steps=max_steps,
-                per_device_train_batch_size=batch_size,
-                gradient_accumulation_steps=gradient_accumulation_steps,
+                per_device_train_batch_size=mps_batch_size,
+                gradient_accumulation_steps=mps_grad_accum,
                 learning_rate=learning_rate,
                 lr_scheduler_type="cosine",
                 warmup_ratio=0.05,
@@ -303,6 +311,12 @@ class DistillationEngine:
                 max_length=512,
                 gradient_checkpointing=True,
                 gradient_checkpointing_kwargs={"use_reentrant": False},
+                # MPS-specific: pin_memory is a no-op on MPS but wastes CPU RAM;
+                # num_workers > 0 causes multiprocessing conflicts with Metal.
+                dataloader_pin_memory=(self.device == "cuda"),
+                dataloader_num_workers=0,
+                # Fused AdamW is more memory-efficient on all backends.
+                optim="adamw_torch_fused" if self.device != "cpu" else "adamw_torch",
             )
 
             trainer = SFTTrainer(
@@ -318,6 +332,14 @@ class DistillationEngine:
             tokenizer.save_pretrained(str(output_path))
             logger.info("Adapter saved to %s (train_loss=%.4f)", output_path, train_loss)
 
+            # ── Explicit memory cleanup ───────────────────────────────────────
+            # Free GPU/MPS memory *inside* the lock so the next consumer
+            # (validation inference) doesn't find the training model still
+            # resident — which would double peak memory to ~6 GB on a 1.5B model.
+            del trainer
+            del model
+            _free_device_cache()
+
         return output_path, train_loss
 
 
@@ -331,10 +353,38 @@ def _detect_device() -> str:
         if torch.cuda.is_available():
             return "cuda"
         if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            # Limit MPS to 85% of shared GPU memory to leave headroom for the OS
+            # and validation inference that follows training.
+            try:
+                torch.mps.set_per_process_memory_fraction(0.85)
+            except Exception:
+                pass
             return "mps"
     except ImportError:
         pass
     return "cpu"
+
+
+def _free_device_cache() -> None:
+    """Force Python GC and flush device memory caches.
+
+    Called immediately after the training model is deleted so the next
+    operation (validation inference) doesn't compete for the same memory.
+    """
+    import gc
+
+    gc.collect()
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+        if hasattr(torch, "mps") and torch.backends.mps.is_available():
+            torch.mps.empty_cache()
+            torch.mps.synchronize()
+    except Exception:
+        pass
 
 
 def _target_modules(model_name: str) -> list[str]:
