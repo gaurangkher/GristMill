@@ -234,6 +234,56 @@ Each experiment paper specifies exact config values, expected results, and succe
 
 ---
 
+## Datasets
+
+Quick reference of recommended HuggingFace datasets for each experiment. Each experiment paper has a full Training Data section with load code and mixing ratios.
+
+| Experiment | Dataset | HF ID | Size | Role |
+|------------|---------|-------|------|------|
+| EXP-004 (reasoning) | MetaMathQA | `meta-math/MetaMathQA` | 395K | Primary — 4–6 reformulations per problem trains generalization |
+| EXP-004 (reasoning) | Orca-Math | `microsoft/orca-math-word-problems-200k` | 200K | Secondary — diverse GPT-4 math word problems |
+| EXP-004 (reasoning) | WizardMath | `WizardLMTeam/WizardMath_Data_With_CoT` | 96K | Fallback — concise CoT, good for 1.5B |
+| EXP-005 (runbooks) | SQuAD 2.0 | `rajpurkar/squad_v2` | 150K | Foundation — context-grounded extraction skill |
+| EXP-005 (runbooks) | StackExchange (ops) | `HuggingFaceH4/stack-exchange-preferences` | varies | Bridge — technical operational Q&A |
+| EXP-005 (runbooks) | TechQA | `ibm/tech_qa` | 1.4K | Bridge — structured technical doc Q&A |
+| EXP-005 (runbooks) | wikiHow | `wikihow/all` | 230K | Proxy — step-by-step procedures (until real runbooks available) |
+| EXP-006 (sentiment) | SST-2 | `stanfordnlp/sst2` | 67K | Foundation — general sentiment regularization |
+| EXP-006 (sentiment) | Twitter Financial News | `zeroshot/twitter-financial-news-sentiment` | 11K | Bridge — professional/technical register |
+| EXP-006 (sentiment) | DynaSent | `dynabench/dynasentiment` | 121K | Robustness — adversarially collected edge cases |
+| EXP-007 (embeddings) | MS MARCO | `microsoft/ms_marco` (`v2.1`) | 8.8M | Foundation — standard passage retrieval training |
+| EXP-007 (embeddings) | Natural Questions | `google-research-datasets/natural_questions` | 307K | Foundation — factual extraction pairs |
+| EXP-007 (embeddings) | GooAQ | `allenai/gooaq` | 3M | Foundation — short-answer retrieval format |
+| EXP-007 (embeddings) | StackExchange (ops) | `HuggingFaceH4/stack-exchange-preferences` | varies | Bridge — technical vocabulary |
+
+> **Contamination warning**: Do not train on GSM8K (reasoning benchmark) or any BEIR dataset (retrieval benchmark). These are reserved for evaluation only.
+
+### Loading Datasets
+
+```python
+from datasets import load_dataset
+
+# Reasoning
+metamath   = load_dataset("meta-math/MetaMathQA", split="train")
+orca_math  = load_dataset("microsoft/orca-math-word-problems-200k", split="train")
+
+# Runbooks (foundation)
+squad      = load_dataset("rajpurkar/squad_v2", split="train")
+techqa     = load_dataset("ibm/tech_qa", split="train")
+wikihow    = load_dataset("wikihow/all", split="train")
+
+# Sentiment
+sst2       = load_dataset("stanfordnlp/sst2", split="train")
+fin_news   = load_dataset("zeroshot/twitter-financial-news-sentiment", split="train")
+dynasent   = load_dataset("dynabench/dynasentiment", split="train")
+
+# Embeddings
+marco      = load_dataset("microsoft/ms_marco", "v2.1", split="train")
+nq         = load_dataset("google-research-datasets/natural_questions", split="train")
+gooaq      = load_dataset("allenai/gooaq", split="train")
+```
+
+---
+
 ## Cross-Cutting Findings
 
 These findings apply across all completed distillation experiments and inform the design of proposed experiments:

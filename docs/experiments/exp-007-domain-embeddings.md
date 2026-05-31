@@ -58,13 +58,74 @@ NDCG@10 without domain fine-tuning: estimated 0.55–0.65 on runbook retrieval. 
 
 ### 3.2 Training Data
 
-Domain fine-tuning uses contrastive learning on `(query, positive_chunk)` pairs with in-batch negatives:
+Bi-encoder training needs `(query, positive_passage)` pairs. The quality of negatives matters as much as the positives — hard negatives (plausibly relevant but actually wrong) produce sharper discrimination than random negatives. Training proceeds in two stages: a general retrieval foundation, then domain fine-tuning.
+
+#### Stage 1: General Retrieval Foundation
+
+Load from HuggingFace and train the base retrieval capability before domain fine-tuning:
+
+| Dataset | HF ID | Sample size | Why it fits |
+|---------|-------|------------|------------|
+| **MS MARCO** *(primary)* | `microsoft/ms_marco` (`v2.1`) | 100K pairs | The standard for retrieval model training. 8.8M passages with BM25-retrieved candidates and binary relevance labels. Use `v2.1` (passage ranking task). |
+| **Natural Questions** | `google-research-datasets/natural_questions` | 50K | Clean (question, Wikipedia paragraph) pairs with exact answer spans. Trains short factual extraction — same skill as "find the threshold value in this runbook section." |
+| **GooAQ** | `allenai/gooaq` | 30K | Google autocomplete questions paired with featured snippet answers. Short, direct Q→A pairs that match the runbook answer format. |
+| **StackExchange** (ops) | `HuggingFaceH4/stack-exchange-preferences` | 5K | Technical Q&A from ServerFault/Unix.SE. Bridges general retrieval to technical vocabulary before domain fine-tuning. |
+
+```python
+from datasets import load_dataset
+
+# MS MARCO — standard passage retrieval pairs
+marco = load_dataset("microsoft/ms_marco", "v2.1", split="train")
+# Each row has: query, passages (list), answers
+# Filter to rows with a positive passage
+marco_pairs = marco.filter(lambda x: any(x["passages"]["is_selected"]))
+marco_sample = marco_pairs.shuffle(seed=42).select(range(100_000))
+
+# Natural Questions
+nq = load_dataset("google-research-datasets/natural_questions", split="train")
+nq_sample = nq.shuffle(seed=42).select(range(50_000))
+
+# GooAQ
+gooaq = load_dataset("allenai/gooaq", split="train")
+gooaq_sample = gooaq.shuffle(seed=42).select(range(30_000))
+```
+
+> **Do not train on BEIR datasets** — BEIR is the standard retrieval evaluation benchmark. Using it for training creates contamination. Use it only to evaluate your fine-tuned embedder against baselines.
+
+#### Stage 2: Domain Fine-Tuning
+
+Domain fine-tuning uses contrastive learning on `(query, positive_chunk)` pairs with hard negatives:
 
 **Positive pairs**: `(user_query, relevant_runbook_chunk)` extracted from the same Q&A pairs generated in EXP-005. For each runbook Q&A pair `(question, answer, source_chunk)`, the positive pair is `(question, source_chunk)`.
 
-**Negative pairs**: Randomly sampled non-relevant chunks from the same runbook corpus, used as hard negatives within each training batch.
+**Hard negatives** (preferred over random negatives): Use BM25 to retrieve top-10 passages for each query, then treat the non-relevant ones as hard negatives. `sentence-transformers` has built-in support:
 
-Target: ≥ 200 positive pairs (2 per runbook Q&A example from EXP-005's seed set of 100 examples).
+```python
+from sentence_transformers.util import mine_hard_negatives
+from sentence_transformers import SentenceTransformer
+
+# Mine hard negatives from your runbook corpus
+hard_negative_dataset = mine_hard_negatives(
+    dataset=runbook_pairs,          # (query, positive_passage) pairs
+    model=SentenceTransformer("nomic-ai/nomic-embed-text-v1"),
+    corpus=runbook_chunks,          # all runbook chunks as the negative pool
+    num_negatives=5,
+    margin=0.1,                     # negatives must score ≥ 0.1 below positive
+    output_dir="data/runbook_hard_negatives/",
+)
+```
+
+Target: ≥ 200 positive pairs (from EXP-005's runbook Q&A seed set).
+
+**Training mix across both stages**:
+
+| Source | Pairs | Stage | Purpose |
+|--------|-------|-------|---------|
+| MS MARCO | 100K | Foundation | General retrieval capability |
+| Natural Questions | 50K | Foundation | Factual extraction |
+| GooAQ | 30K | Foundation | Short-answer format |
+| StackExchange ops | 5K | Bridge | Technical register |
+| Runbook pairs + hard negatives | 200–1K | Domain | Domain-specific precision |
 
 ### 3.3 Training Approach
 

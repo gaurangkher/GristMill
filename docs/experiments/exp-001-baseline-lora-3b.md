@@ -30,7 +30,9 @@ The broader hypothesis being tested: can a small language model (3B parameters) 
 
 ### 2.2 Training Data
 
-2,405 reasoning examples from the OpenHermes-2.5 dataset, stored in the training buffer SQLite database under `domain_tag IN ('reasoning', 'default')`. Examples follow a structured step-by-step format: the teacher (Ollama llama3.1:8b) is prompted with a multi-step arithmetic or logic question and responds with a numbered chain of steps.
+2,405 reasoning examples from the **OpenHermes-2.5** dataset, stored in the training buffer SQLite database under `domain_tag IN ('reasoning', 'default')`. Examples follow a structured step-by-step format: the teacher (Ollama llama3.1:8b) is prompted with a multi-step arithmetic or logic question and responds with a numbered chain of steps.
+
+> **Post-hoc assessment**: OpenHermes-2.5 is a broad general-instruction dataset covering math, code, creative writing, roleplay, and trivia. Its diversity — which makes it useful as a general-purpose instruction dataset — is a liability here: the model cannot learn "math reasoning style" when ~60% of training examples are structurally unrelated. EXP-004 replaces this with **MetaMathQA** (`meta-math/MetaMathQA`), a focused math reasoning dataset where every example is a quantitative word problem with a clean numeric answer, and each problem is reformulated 4–6 ways to drive generalization rather than memorization.
 
 ### 2.3 Hardware
 
