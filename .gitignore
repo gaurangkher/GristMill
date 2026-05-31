@@ -71,4 +71,5 @@ gristmill-data/ollama-models/*
 gristmill-data/mlflow/*
 !gristmill-data/mlflow/.gitkeep
 # plugins ARE committed — they are source code
-# config.yaml is committed as a template — replace REPLACE_ME before use
+# gristmill-data/config.yaml contains secrets (API keys, tokens) — never commit
+gristmill-data/config.yaml

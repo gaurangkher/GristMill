@@ -34,7 +34,11 @@ from gristmill_ml.trainer.checkpoint import CheckpointManager
 from gristmill_ml.trainer.distillation import DistillationEngine
 from gristmill_ml.trainer.ipc_server import TrainerIpcServer
 from gristmill_ml.trainer.retention import RetentionBuffer
-from gristmill_ml.trainer.validation import ValidationResult, ValidationRunner
+from gristmill_ml.trainer.validation import (
+    FactualAccuracyRunner,
+    ValidationResult,
+    ValidationRunner,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -128,7 +132,7 @@ class GristMillTrainerService:
 
         self.checkpoint_mgr = CheckpointManager(checkpoint_root or _resolve_checkpoint_root())
         self.retention_buf = RetentionBuffer()
-        self.validation_runner = ValidationRunner(base_model_name=self.base_model_name)
+        self.validation_runner = _build_validation_runner(self.base_model_name)
 
         self._state = TrainerState.IDLE
         self._start_time = time.time()
@@ -793,6 +797,43 @@ def _resolve_checkpoint_root() -> Path:
     from gristmill_ml.trainer.checkpoint import _resolve_checkpoint_root as _cp_root
 
     return _cp_root()
+
+
+def _resolve_validation_strategy() -> dict:
+    """Return validation config from ``trainer.validation`` in config.yaml.
+
+    Returns a dict with keys:
+        strategy    — ``"rouge_l"`` (default) or ``"factual_accuracy"``
+        probe_set   — probe YAML name (default ``"reasoning"``)
+        min_accuracy — float threshold (default 0.6)
+    """
+    vcfg = (_load_gristmill_config().get("trainer") or {}).get("validation", {})
+    return {
+        "strategy": vcfg.get("strategy", "rouge_l"),
+        "probe_set": vcfg.get("probe_set", "reasoning"),
+        "min_accuracy": float(vcfg.get("min_accuracy", 0.6)),
+    }
+
+
+def _build_validation_runner(base_model_name: str):
+    """Instantiate the correct validation runner based on config strategy."""
+    val_cfg = _resolve_validation_strategy()
+    strategy = val_cfg["strategy"]
+
+    if strategy == "factual_accuracy":
+        logger.info(
+            "Validation strategy: factual_accuracy (probe_set=%s, min_accuracy=%.2f)",
+            val_cfg["probe_set"],
+            val_cfg["min_accuracy"],
+        )
+        return FactualAccuracyRunner(
+            base_model_name=base_model_name,
+            probe_set=val_cfg["probe_set"],
+            min_accuracy=val_cfg["min_accuracy"],
+        )
+
+    logger.info("Validation strategy: rouge_l (legacy)")
+    return ValidationRunner(base_model_name=base_model_name)
 
 
 def _resolve_lock_path() -> Path:

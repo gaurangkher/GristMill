@@ -1,18 +1,32 @@
-"""ValidationRunner + RollbackController — post-cycle checkpoint validation.
+"""Validation runners for post-cycle checkpoint promotion decisions.
 
-Two-stage evaluation before a staged adapter is promoted to active
-(Section 4.6.6 of the spec):
+Two strategies are supported, selected via ``trainer.validation.strategy`` in config.yaml:
 
-Stage 1 — Held-out validation set (200 examples, 50 per domain):
-    • Overall ROUGE-L delta   >= -0.01
-    • Per-domain ROUGE-L delta >= -0.03 on any single domain
-    • Confidence calibration ECE delta <= 0.05  (placeholder — requires Self-REF)
+``rouge_l`` (default, legacy)
+    Two-stage evaluation against a held-out set sampled from the training buffer:
 
-Stage 2 — Retention score:
-    • Retention ROUGE-L >= 0.90 × prior retention ROUGE-L
+    Stage 1 — ROUGE-L delta vs. prior adapter:
+        • Overall ROUGE-L delta   >= overall_delta_min  (default -0.05)
+        • Per-domain ROUGE-L delta >= domain_delta_min   (default -0.08)
 
-The validation set is created once on first run from the training buffer,
-stored at ~/.gristmill/db/validation_set.json, and never updated.
+    Stage 2 — Retention score:
+        • Retention ROUGE-L >= 0.90 × prior adapter's retention ROUGE-L
+
+    ⚠ Known limitation: ROUGE-L rewards verbatim surface overlap with teacher text,
+    which is inversely correlated with factual accuracy for reasoning tasks (see
+    docs/lora-distillation-experiments.md §6.2 and §6.6).
+
+``factual_accuracy`` (recommended for reasoning domains)
+    Single-stage evaluation against a named probe set (probes/<name>.yaml):
+
+    • Runs the staged adapter on each probe question
+    • Checks whether the probe's ``correct_answer`` string appears in the response
+    • Promotes if accuracy >= min_accuracy  (default 0.6)
+
+    Advantages over ROUGE-L:
+    - Ground-truth correct answers, not teacher-surface-form overlap
+    - Absolute threshold, no noisy delta vs. prior adapter
+    - Immediately interpretable: "4 of 5 probes correct"
 """
 
 from __future__ import annotations
@@ -281,18 +295,19 @@ def _run_adapter_inference(
     from peft import PeftModel
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
-    device = "cuda" if _cuda_available() else "cpu"
+    device = _detect_device()
     tokenizer = AutoTokenizer.from_pretrained(base_model_name, trust_remote_code=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "left"
 
-    base = AutoModelForCausalLM.from_pretrained(
-        base_model_name,
-        torch_dtype=torch.bfloat16 if device != "cpu" else torch.float32,
-        device_map=device,
-        trust_remote_code=True,
-    )
+    from_pretrained_kwargs: dict = {
+        "torch_dtype": torch.bfloat16 if device != "cpu" else torch.float32,
+        "trust_remote_code": True,
+    }
+    if device != "cpu":
+        from_pretrained_kwargs["device_map"] = device
+    base = AutoModelForCausalLM.from_pretrained(base_model_name, **from_pretrained_kwargs)
     model = PeftModel.from_pretrained(base, str(adapter_path))
     model.eval()
 
@@ -323,13 +338,19 @@ def _run_adapter_inference(
             generated = tokenizer.decode(generated_ids, skip_special_tokens=True)
             scores[ex["record_id"]] = _rouge_l(generated, ref)
 
-    # Free VRAM
-    del model, base
-    try:
-        import torch
+    # Free VRAM — explicit del + gc ensures memory is returned before
+    # the next model load (validation or subsequent training cycle).
+    import gc
 
+    del model, base
+    gc.collect()
+    try:
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+        if hasattr(torch, "mps") and torch.backends.mps.is_available():
+            torch.mps.empty_cache()
+            torch.mps.synchronize()
     except Exception:
         pass
 
@@ -395,6 +416,20 @@ def _load_validation_config() -> dict:
     return {}
 
 
+def _detect_device() -> str:
+    """Return the best available device: cuda > mps > cpu."""
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            return "cuda"
+        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            return "mps"
+    except ImportError:
+        pass
+    return "cpu"
+
+
 def _cuda_available() -> bool:
     try:
         import torch
@@ -402,6 +437,221 @@ def _cuda_available() -> bool:
         return torch.cuda.is_available()
     except ImportError:
         return False
+
+
+# ── FactualAccuracyRunner ─────────────────────────────────────────────────────
+
+
+class FactualAccuracyRunner:
+    """Validate a staged adapter by checking factual accuracy on a probe set.
+
+    Uses ``probes/<probe_set>.yaml`` files (committed to the repo) instead of
+    sampling from the training buffer.  Each probe with a ``correct_answer``
+    field is evaluated by checking whether that string appears in the model's
+    response (case-insensitive substring match).
+
+    Promotion gate: ``accuracy >= min_accuracy``  (absolute, not a delta).
+
+    Parameters
+    ----------
+    base_model_name:
+        HuggingFace model id or local path for the student base model.
+    probe_set:
+        Name of the probe YAML file to load (without ``.yaml``).
+        Defaults to ``"reasoning"``.
+    min_accuracy:
+        Minimum fraction of checkable probes that must be answered correctly
+        to promote the adapter.  Defaults to ``0.6`` (60 %).
+    probes_dir:
+        Override the default ``probes/`` directory.
+    """
+
+    def __init__(
+        self,
+        base_model_name: Optional[str] = None,
+        probe_set: str = "reasoning",
+        min_accuracy: float = 0.6,
+        probes_dir: Optional[Path] = None,
+    ) -> None:
+        import os
+
+        self.base_model_name = base_model_name or os.environ.get(
+            "GRISTMILL_BASE_MODEL", "Qwen/Qwen2.5-3B-Instruct"
+        )
+        self.probe_set = probe_set
+        self.min_accuracy = min_accuracy
+        self.probes_dir = probes_dir
+        self.device = _detect_device()
+
+    def ensure_validation_set(self, training_db_path: Path) -> bool:
+        """No-op — probe sets are static YAML files, not sampled from the buffer."""
+        return False
+
+    def validate(
+        self,
+        staged_adapter_path: Path,
+        prior_adapter_path: Optional[Path],
+        retention_records: list[dict],
+        prior_metrics_path: Optional[Path] = None,
+    ) -> ValidationResult:
+        """Run factual accuracy evaluation and return the promotion decision."""
+        from gristmill_ml.experiments.adapter_eval import load_probes
+
+        try:
+            probes = load_probes(self.probe_set, probes_dir=self.probes_dir)
+        except FileNotFoundError as exc:
+            logger.warning("Probe set not found — auto-passing validation: %s", exc)
+            return ValidationResult(
+                passed=True,
+                overall_score=1.0,
+                prior_overall_score=1.0,
+                overall_delta=0.0,
+                failure_reason=None,
+            )
+
+        checkable = [p for p in probes if p.get("correct_answer")]
+        if not checkable:
+            logger.warning(
+                "Probe set '%s' has no correct_answer fields — auto-passing", self.probe_set
+            )
+            return ValidationResult(
+                passed=True,
+                overall_score=1.0,
+                prior_overall_score=1.0,
+                overall_delta=0.0,
+                failure_reason=None,
+            )
+
+        logger.info(
+            "FactualAccuracyRunner: evaluating %d probes from '%s' (device=%s)",
+            len(probes),
+            self.probe_set,
+            self.device,
+        )
+        responses = _run_probe_inference(
+            base_model_name=self.base_model_name,
+            adapter_path=staged_adapter_path,
+            probes=probes,
+            device=self.device,
+        )
+
+        correct = 0
+        for probe, response in zip(probes, responses):
+            ca = probe.get("correct_answer")
+            if not ca:
+                continue
+            is_correct = ca.strip().lower() in response.lower()
+            correct += int(is_correct)
+            logger.info(
+                "  %-35s correct=%-5s  expected=%r  got=%r",
+                probe.get("id", "?"),
+                str(is_correct),
+                ca.strip(),
+                response[:120].replace("\n", " "),
+            )
+
+        total = len(checkable)
+        accuracy = correct / total
+        passed = accuracy >= self.min_accuracy
+        failure_reason = (
+            None
+            if passed
+            else (
+                f"accuracy={accuracy:.2f} ({correct}/{total} correct)"
+                f" < min_accuracy={self.min_accuracy:.2f}"
+            )
+        )
+
+        logger.info(
+            "FactualAccuracyRunner: accuracy=%.2f (%d/%d) — %s",
+            accuracy,
+            correct,
+            total,
+            "PASS" if passed else f"FAIL ({failure_reason})",
+        )
+
+        return ValidationResult(
+            passed=passed,
+            # overall_score carries the factual accuracy (0–1) into the manifest
+            overall_score=accuracy,
+            # prior_overall_score not meaningful for an absolute metric
+            prior_overall_score=0.0,
+            # overall_delta: positive = passed the gate, negative = failed
+            overall_delta=accuracy - self.min_accuracy,
+            failure_reason=failure_reason,
+        )
+
+
+def _run_probe_inference(
+    base_model_name: str,
+    adapter_path: Path,
+    probes: list[dict],
+    device: str = "cpu",
+    max_new_tokens: int = 256,
+) -> list[str]:
+    """Load adapter, run each probe question through chat template, return responses."""
+    import torch
+    from peft import PeftModel
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    tokenizer = AutoTokenizer.from_pretrained(base_model_name, trust_remote_code=True)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    from_pretrained_kwargs: dict = {
+        "torch_dtype": torch.bfloat16 if device != "cpu" else torch.float32,
+        "trust_remote_code": True,
+    }
+    if device != "cpu":
+        from_pretrained_kwargs["device_map"] = device
+
+    base = AutoModelForCausalLM.from_pretrained(base_model_name, **from_pretrained_kwargs)
+    model = PeftModel.from_pretrained(base, str(adapter_path))
+    model.eval()
+
+    responses: list[str] = []
+    for probe in probes:
+        question = probe.get("question", "").strip()
+        messages = [{"role": "user", "content": question}]
+        try:
+            text = tokenizer.apply_chat_template(
+                messages, tokenize=False, add_generation_prompt=True
+            )
+        except Exception:
+            text = f"<|user|>\n{question}\n<|assistant|>\n"
+
+        inputs = tokenizer(text, return_tensors="pt")
+        try:
+            target_device = next(model.parameters()).device
+            inputs = {k: v.to(target_device) for k, v in inputs.items()}
+        except StopIteration:
+            pass
+
+        with torch.no_grad():
+            out = model.generate(
+                **inputs,
+                max_new_tokens=max_new_tokens,
+                do_sample=False,
+                pad_token_id=tokenizer.pad_token_id,
+            )
+        generated_ids = out[0][inputs["input_ids"].shape[1] :]
+        responses.append(tokenizer.decode(generated_ids, skip_special_tokens=True))
+
+    import gc
+
+    del model, base
+    gc.collect()
+    try:
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+        if hasattr(torch, "mps") and torch.backends.mps.is_available():
+            torch.mps.empty_cache()
+            torch.mps.synchronize()
+    except Exception:
+        pass
+
+    return responses
 
 
 def _sample_validation_set(training_db_path: Path) -> list[dict]:

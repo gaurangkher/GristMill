@@ -132,8 +132,8 @@ def main() -> None:
     parser.add_argument(
         "--max-new-tokens",
         type=int,
-        default=256,
-        help="Maximum tokens to generate per response (default: 256)",
+        default=512,
+        help="Maximum tokens to generate per response (default: 512)",
     )
     parser.add_argument(
         "--output",
