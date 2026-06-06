@@ -40,7 +40,6 @@ _FALLBACK_ROOT = Path.home() / ".gristmill" / "checkpoints"
 def _resolve_checkpoint_root() -> Path:
     """Return the checkpoint root from config, falling back to Docker then host defaults."""
     try:
-        import os
 
         import yaml  # type: ignore[import]
 

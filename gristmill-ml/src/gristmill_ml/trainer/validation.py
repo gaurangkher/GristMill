@@ -396,9 +396,7 @@ def _mean_scores(scores: dict[str, float]) -> float:
 def _load_validation_config() -> dict:
     """Read validation thresholds from config.yaml trainer.validation section."""
     try:
-        import os
         import yaml  # type: ignore[import]
-        from pathlib import Path as _Path
 
         from gristmill_ml.config import config_candidates
         for p in config_candidates():
