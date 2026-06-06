@@ -40,10 +40,10 @@ _FALLBACK_ROOT = Path.home() / ".gristmill" / "checkpoints"
 def _resolve_checkpoint_root() -> Path:
     """Return the checkpoint root from config, falling back to Docker then host defaults."""
     try:
-
         import yaml  # type: ignore[import]
 
         from gristmill_ml.config import config_candidates
+
         for p in config_candidates():
             if p.exists():
                 cfg = yaml.safe_load(p.read_text()) or {}
@@ -64,7 +64,17 @@ def _resolve_checkpoint_root() -> Path:
 HISTORY_KEEP = 5  # Number of historical versions to retain
 
 # Supported domain tags (must stay in sync with DomainTag in training_buffer.rs).
-KNOWN_DOMAINS = ("code", "writing", "reasoning", "qa", "creative", "other", "default", "runbooks", "runbooks_foundation")
+KNOWN_DOMAINS = (
+    "code",
+    "writing",
+    "reasoning",
+    "qa",
+    "creative",
+    "other",
+    "default",
+    "runbooks",
+    "runbooks_foundation",
+)
 
 
 # ── Manifest ─────────────────────────────────────────────────────────────────

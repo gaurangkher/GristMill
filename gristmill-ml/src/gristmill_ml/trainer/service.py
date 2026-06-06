@@ -311,9 +311,7 @@ class GristMillTrainerService:
 
             # ── Resolve per-domain hparams and validation runner ──────────────
             domain_hparams = _resolve_train_hparams(domain=domain)
-            domain_validation_runner = _build_validation_runner(
-                self.base_model_name, domain=domain
-            )
+            domain_validation_runner = _build_validation_runner(self.base_model_name, domain=domain)
             logger.info(
                 "Cycle [%s] hparams: rank=%s alpha=%s lr=%s epochs=%s",
                 domain,
@@ -759,6 +757,7 @@ class GristMillTrainerService:
 def _load_gristmill_config() -> dict:
     """Return parsed config.yaml, or {} if none found."""
     from gristmill_ml.config import load_config
+
     return load_config()
 
 

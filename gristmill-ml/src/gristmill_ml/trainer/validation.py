@@ -399,6 +399,7 @@ def _load_validation_config() -> dict:
         import yaml  # type: ignore[import]
 
         from gristmill_ml.config import config_candidates
+
         for p in config_candidates():
             if p.exists():
                 cfg = yaml.safe_load(p.read_text()) or {}

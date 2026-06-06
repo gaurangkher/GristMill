@@ -280,6 +280,7 @@ class CommunityRepoClient:
 
         if config_path is None:
             from gristmill_ml.config import config_candidates
+
             config_path = next((p for p in config_candidates() if p.exists()), None)
 
         cfg: dict = {}
