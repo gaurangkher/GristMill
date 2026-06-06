@@ -13,9 +13,10 @@
  */
 
 import { readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 import { parse as parseYaml } from "yaml";
+import { fileURLToPath } from "node:url";
 
 // ── Types (matches grist-config IntegrationsConfig shape) ─────────────────────
 
@@ -141,10 +142,33 @@ export interface GristMillTsConfig {
  * Load and merge config.yaml + environment variables.
  * Always succeeds — missing file or parse errors fall back to defaults/env vars.
  */
+/** Resolve config.yaml with the same priority as the Python side:
+ *  1. GRISTMILL_CONFIG env var
+ *  2. /data/gristmill/config.yaml  (Docker)
+ *  3. <repo-root>/gristmill-data/config.yaml  (local dev)
+ *  4. ~/.gristmill/config.yaml  (legacy)
+ */
+function _resolveConfigPath(): string {
+  if (process.env["GRISTMILL_CONFIG"]) return process.env["GRISTMILL_CONFIG"];
+  const dockerPath = "/data/gristmill/config.yaml";
+  if (existsSync(dockerPath)) return dockerPath;
+  // gristmill-integrations/ is one level below repo root
+  try {
+    const thisFile = fileURLToPath(import.meta.url);
+    const repoRoot = join(dirname(thisFile), "..", "..", "..", "..");
+    const repoPath = join(repoRoot, "gristmill-data", "config.yaml");
+    if (existsSync(repoPath)) return repoPath;
+  } catch {
+    // CJS environment — __dirname available
+    const repoRoot = join(__dirname, "..", "..", "..", "..");
+    const repoPath = join(repoRoot, "gristmill-data", "config.yaml");
+    if (existsSync(repoPath)) return repoPath;
+  }
+  return join(homedir(), ".gristmill", "config.yaml");
+}
+
 export function loadConfig(): GristMillTsConfig {
-  const configPath =
-    process.env["GRISTMILL_CONFIG"] ??
-    join(homedir(), ".gristmill", "config.yaml");
+  const configPath = _resolveConfigPath();
 
   let yaml: GristMillYaml = {};
   if (existsSync(configPath)) {

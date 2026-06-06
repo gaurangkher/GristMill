@@ -400,14 +400,8 @@ def _load_validation_config() -> dict:
         import yaml  # type: ignore[import]
         from pathlib import Path as _Path
 
-        candidates = []
-        if env_cfg := os.environ.get("GRISTMILL_CONFIG"):
-            candidates.append(_Path(env_cfg))
-        candidates += [
-            _Path("/data/gristmill/config.yaml"),
-            _Path.home() / ".gristmill" / "config.yaml",
-        ]
-        for p in candidates:
+        from gristmill_ml.config import config_candidates
+        for p in config_candidates():
             if p.exists():
                 cfg = yaml.safe_load(p.read_text()) or {}
                 return (cfg.get("trainer") or {}).get("validation", {})
@@ -472,6 +466,7 @@ class FactualAccuracyRunner:
         probe_set: str = "reasoning",
         min_accuracy: float = 0.6,
         probes_dir: Optional[Path] = None,
+        use_context: bool = False,
     ) -> None:
         import os
 
@@ -481,6 +476,7 @@ class FactualAccuracyRunner:
         self.probe_set = probe_set
         self.min_accuracy = min_accuracy
         self.probes_dir = probes_dir
+        self.use_context = use_context
         self.device = _detect_device()
 
     def ensure_validation_set(self, training_db_path: Path) -> bool:
@@ -533,6 +529,7 @@ class FactualAccuracyRunner:
             adapter_path=staged_adapter_path,
             probes=probes,
             device=self.device,
+            use_context=self.use_context,
         )
 
         correct = 0
@@ -588,8 +585,15 @@ def _run_probe_inference(
     probes: list[dict],
     device: str = "cpu",
     max_new_tokens: int = 256,
+    use_context: bool = False,
 ) -> list[str]:
-    """Load adapter, run each probe question through chat template, return responses."""
+    """Load adapter, run each probe question through chat template, return responses.
+
+    When *use_context* is True and a probe has a ``context`` field, that field is
+    used as the prompt instead of ``question``.  This matches the RAG inference
+    condition where the retrieved runbook excerpt is injected before the question —
+    exactly the format the model was trained on (``[RUNBOOK CONTEXT]\\n...\\nQuestion: ...``).
+    """
     import torch
     from peft import PeftModel
     from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -611,7 +615,10 @@ def _run_probe_inference(
 
     responses: list[str] = []
     for probe in probes:
-        question = probe.get("question", "").strip()
+        if use_context and probe.get("context"):
+            question = probe["context"].strip()
+        else:
+            question = probe.get("question", "").strip()
         messages = [{"role": "user", "content": question}]
         try:
             text = tokenizer.apply_chat_template(

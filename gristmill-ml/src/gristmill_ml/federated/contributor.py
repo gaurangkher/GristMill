@@ -228,10 +228,11 @@ class GradientContributor:
         import yaml  # type: ignore[import]
 
         if config_path is None:
-            config_path = Path.home() / ".gristmill" / "config.yaml"
+            from gristmill_ml.config import config_candidates
+            config_path = next((p for p in config_candidates() if p.exists()), None)
 
         cfg: dict = {}
-        if config_path.exists():
+        if config_path is not None and config_path.exists():
             try:
                 cfg = yaml.safe_load(config_path.read_text()) or {}
             except Exception as exc:

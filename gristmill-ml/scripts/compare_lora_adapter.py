@@ -47,28 +47,12 @@ if str(_HERE / "src") not in sys.path:
 
 
 def _resolve_config() -> dict:
-    """Load gristmill config.yaml (same search order as the trainer)."""
-    import os
-
+    """Load gristmill config.yaml (delegates to gristmill_ml.config)."""
     try:
-        import yaml  # type: ignore[import]
-    except ImportError:
+        from gristmill_ml.config import load_config
+        return load_config()
+    except Exception:
         return {}
-
-    candidates = []
-    if env := os.environ.get("GRISTMILL_CONFIG"):
-        candidates.append(Path(env))
-    candidates += [
-        Path("/data/gristmill/config.yaml"),
-        Path.home() / ".gristmill" / "config.yaml",
-    ]
-    for p in candidates:
-        if p.exists():
-            try:
-                return yaml.safe_load(p.read_text()) or {}
-            except Exception:
-                pass
-    return {}
 
 
 def _default_base_model(cfg: dict) -> str:
@@ -147,6 +131,16 @@ def main() -> None:
         default=None,
         help="Override the default probes/ directory",
     )
+    parser.add_argument(
+        "--with-context",
+        action="store_true",
+        help=(
+            "Use the 'context' field from each probe as the question input instead of 'question'. "
+            "Simulates the RAG retrieval condition: the runbook excerpt is pre-injected into the "
+            "prompt so the model reads from retrieved context rather than relying on its weights. "
+            "Falls back to 'question' if a probe has no 'context' field."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -182,10 +176,25 @@ def main() -> None:
         if args.question:
             probes = probes_from_questions([args.question]) + probes
 
+    # ── Apply --with-context: swap question → context field ──────────────────
+    if args.with_context:
+        injected = 0
+        for p in probes:
+            if p.get("context"):
+                p["question"] = p["context"]
+                injected += 1
+        if injected == 0:
+            print(
+                "WARNING: --with-context set but no probes have a 'context' field — "
+                "falling back to bare questions.",
+                file=sys.stderr,
+            )
+
+    retrieval_label = " +context" if args.with_context else ""
     print(f"Base model : {args.base_model}")
     print(f"Adapter    : {adapter_path}")
     print(f"Domain     : {args.domain}")
-    print(f"Probe set  : {probe_set_name} ({len(probes)} probes)")
+    print(f"Probe set  : {probe_set_name} ({len(probes)} probes){retrieval_label}")
     print()
 
     # ── Run evaluation ────────────────────────────────────────────────────────
@@ -195,7 +204,7 @@ def main() -> None:
         domain=args.domain,
         max_new_tokens=args.max_new_tokens,
     )
-    report = evaluator.evaluate(probes, probe_set=probe_set_name)
+    report = evaluator.evaluate(probes, probe_set=f"{probe_set_name}{retrieval_label.strip()}")
     report.print_report()
 
     # ── Save JSON ─────────────────────────────────────────────────────────────
