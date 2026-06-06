@@ -451,24 +451,19 @@ def _build_examples(
 
 
 def _load_pending_records(db_path: Path, domain: str = "default") -> list[dict]:
-    """Load PENDING training records, optionally filtered by *domain*.
+    """Load PENDING training records filtered strictly by *domain_tag*.
 
-    When *domain* is ``"default"`` all PENDING records are returned (unified
-    mode for backward compatibility).  For any other domain only records with
-    a matching ``domain_tag`` column are returned.
+    Every domain — including ``"default"`` — only sees records explicitly
+    tagged for that domain.  This prevents concurrent domain cycles from
+    racing over the same records.
     """
     try:
         conn = sqlite3.connect(str(db_path), check_same_thread=False)
         conn.row_factory = sqlite3.Row
-        if domain == "default":
-            rows = conn.execute(
-                "SELECT * FROM training_records WHERE status = 'PENDING'"
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT * FROM training_records WHERE status = 'PENDING' AND domain_tag = ?",
-                (domain,),
-            ).fetchall()
+        rows = conn.execute(
+            "SELECT * FROM training_records WHERE status = 'PENDING' AND domain_tag = ?",
+            (domain,),
+        ).fetchall()
         conn.close()
         return [dict(r) for r in rows]
     except sqlite3.Error as exc:

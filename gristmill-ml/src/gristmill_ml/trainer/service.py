@@ -30,7 +30,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Optional
 
-from gristmill_ml.trainer.checkpoint import CheckpointManager
+from gristmill_ml.trainer.checkpoint import CheckpointManager, KNOWN_DOMAINS
 from gristmill_ml.trainer.distillation import DistillationEngine
 from gristmill_ml.trainer.ipc_server import TrainerIpcServer
 from gristmill_ml.trainer.retention import RetentionBuffer
@@ -132,6 +132,8 @@ class GristMillTrainerService:
 
         self.checkpoint_mgr = CheckpointManager(checkpoint_root or _resolve_checkpoint_root())
         self.retention_buf = RetentionBuffer()
+        # Validation runner is now built per-domain in _run_cycle; keep a default
+        # for the health API and any legacy callers.
         self.validation_runner = _build_validation_runner(self.base_model_name)
 
         self._state = TrainerState.IDLE
@@ -190,10 +192,28 @@ class GristMillTrainerService:
 
     # ── Trigger condition ─────────────────────────────────────────────────────
 
+    def _resolve_pending_trigger(self, domain: str = "default") -> int:
+        """Return the pending-record trigger threshold for *domain*.
+
+        Reads ``trainer.domains.<domain>.pending_trigger`` from config,
+        falling back to ``trainer.pending_trigger``, then the module constant.
+        """
+        try:
+            cfg = _load_gristmill_config()
+            t = cfg.get("trainer") or {}
+            domain_overrides = (t.get("domains") or {}).get(domain) or {}
+            merged = {**t, **domain_overrides}
+            if "pending_trigger" in merged:
+                return int(merged["pending_trigger"])
+        except Exception:
+            pass
+        return PENDING_TRIGGER
+
     def _trigger_condition_met(self, domain: str = "default") -> bool:
         pending = self._count_pending(domain=domain)
-        if pending >= PENDING_TRIGGER:
-            logger.debug("Trigger [%s]: %d pending records >= %d", domain, pending, PENDING_TRIGGER)
+        threshold = self._resolve_pending_trigger(domain)
+        if pending >= threshold:
+            logger.debug("Trigger [%s]: %d pending records >= %d", domain, pending, threshold)
             return True
         if self._last_cycle_at is not None:
             days_since = (time.time() - self._last_cycle_at) / 86400
@@ -210,15 +230,10 @@ class GristMillTrainerService:
     def _count_pending(self, domain: str = "default") -> int:
         try:
             conn = sqlite3.connect(str(self.training_db_path))
-            if domain == "default":
-                count = conn.execute(
-                    "SELECT COUNT(*) FROM training_records WHERE status='PENDING'"
-                ).fetchone()[0]
-            else:
-                count = conn.execute(
-                    "SELECT COUNT(*) FROM training_records WHERE status='PENDING' AND domain_tag=?",
-                    (domain,),
-                ).fetchone()[0]
+            count = conn.execute(
+                "SELECT COUNT(*) FROM training_records WHERE status='PENDING' AND domain_tag=?",
+                (domain,),
+            ).fetchone()[0]
             conn.close()
             return count
         except sqlite3.Error:
@@ -294,6 +309,18 @@ class GristMillTrainerService:
                 for r in self.retention_buf.get_all()
             ]
 
+            # ── Resolve per-domain hparams and validation runner ──────────────
+            domain_hparams = _resolve_train_hparams(domain=domain)
+            domain_validation_runner = _build_validation_runner(self.base_model_name, domain=domain)
+            logger.info(
+                "Cycle [%s] hparams: rank=%s alpha=%s lr=%s epochs=%s",
+                domain,
+                domain_hparams.get("lora_rank", "default"),
+                domain_hparams.get("lora_alpha", "default"),
+                domain_hparams.get("learning_rate", "default"),
+                domain_hparams.get("num_epochs", "default"),
+            )
+
             # ── Run LoRA training ─────────────────────────────────────────────
             prior_adapter = self.checkpoint_mgr.active_adapter_path(domain=domain)
             engine = DistillationEngine(
@@ -308,7 +335,7 @@ class GristMillTrainerService:
                     retention_records=retention_records,
                     version=cycle_version,
                     domain=domain,
-                    **self._train_hparams,
+                    **domain_hparams,
                 ),
             )
 
@@ -330,10 +357,10 @@ class GristMillTrainerService:
             async with self._lock:
                 self._state = TrainerState.VALIDATING
 
-            self.validation_runner.ensure_validation_set(self.training_db_path)
+            domain_validation_runner.ensure_validation_set(self.training_db_path)
             val_result: ValidationResult = await loop.run_in_executor(
                 None,
-                lambda: self.validation_runner.validate(
+                lambda: domain_validation_runner.validate(
                     staged_adapter_path=self.checkpoint_mgr.domain_staging_dir(domain),
                     prior_adapter_path=prior_adapter,
                     retention_records=retention_records,
@@ -502,7 +529,7 @@ class GristMillTrainerService:
                 if self._last_cycle_at
                 else None
             ),
-            "buffer_pending_count": self._count_pending(),
+            "buffer_pending_count": sum(self._count_pending(d) for d in KNOWN_DOMAINS),
             "teacher_cost_usd_total": round(self._teacher_cost_usd_total, 6),
             "domains": manifest.domains if manifest else {},
             "student_model": self.base_model_name,
@@ -728,32 +755,10 @@ class GristMillTrainerService:
 
 
 def _load_gristmill_config() -> dict:
-    """Return parsed config.yaml, or {} if none found.
+    """Return parsed config.yaml, or {} if none found."""
+    from gristmill_ml.config import load_config
 
-    Search order:
-      1. GRISTMILL_CONFIG env var
-      2. /data/gristmill/config.yaml  (Docker bind-mount)
-      3. ~/.gristmill/config.yaml     (local install)
-    """
-    import os
-
-    import yaml  # type: ignore[import]
-
-    candidates = []
-    if env_cfg := os.environ.get("GRISTMILL_CONFIG"):
-        candidates.append(Path(env_cfg))
-    candidates += [
-        Path("/data/gristmill/config.yaml"),
-        Path.home() / ".gristmill" / "config.yaml",
-    ]
-    for p in candidates:
-        if p.exists():
-            try:
-                return yaml.safe_load(p.read_text()) or {}
-            except Exception:
-                logger.warning("Could not parse config at %s", p)
-            break
-    return {}
+    return load_config()
 
 
 def _resolve_db_path() -> Path:
@@ -773,22 +778,36 @@ def _resolve_base_model() -> str:
     return (cfg.get("trainer") or {}).get("base_model", "Qwen/Qwen2.5-3B-Instruct")
 
 
-def _resolve_train_hparams() -> dict:
-    """Return LoRA training hyperparameters from config with safe defaults."""
-    t = _load_gristmill_config().get("trainer") or {}
+def _resolve_train_hparams(domain: str = "default") -> dict:
+    """Return LoRA training hyperparameters for *domain*.
+
+    Lookup order: trainer.domains.<domain> overrides trainer.* globals.
+    Only keys present in config override the DistillationEngine defaults.
+    """
+    cfg = _load_gristmill_config()
+    t = cfg.get("trainer") or {}
+    # Per-domain overrides sit under trainer.domains.<domain>
+    domain_overrides = (t.get("domains") or {}).get(domain) or {}
+    # Merge: global first, then domain-specific on top
+    merged = {**t, **domain_overrides}
+
     hparams: dict = {}
-    if "num_epochs" in t:
-        hparams["num_epochs"] = int(t["num_epochs"])
-    if "learning_rate" in t:
-        hparams["learning_rate"] = float(t["learning_rate"])
-    if "lora_rank" in t:
-        hparams["lora_rank"] = int(t["lora_rank"])
-    if "lora_alpha" in t:
-        hparams["lora_alpha"] = int(t["lora_alpha"])
-    if "lora_target_modules" in t:
-        hparams["lora_target_modules"] = str(t["lora_target_modules"])
-    if "replay_fraction" in t:
-        hparams["replay_fraction"] = float(t["replay_fraction"])
+    if "num_epochs" in merged:
+        hparams["num_epochs"] = int(merged["num_epochs"])
+    if "learning_rate" in merged:
+        hparams["learning_rate"] = float(merged["learning_rate"])
+    if "lora_rank" in merged:
+        hparams["lora_rank"] = int(merged["lora_rank"])
+    if "lora_alpha" in merged:
+        hparams["lora_alpha"] = int(merged["lora_alpha"])
+    if "lora_target_modules" in merged:
+        hparams["lora_target_modules"] = str(merged["lora_target_modules"])
+    if "replay_fraction" in merged:
+        hparams["replay_fraction"] = float(merged["replay_fraction"])
+    if "batch_size" in merged:
+        hparams["batch_size"] = int(merged["batch_size"])
+    if "gradient_accumulation_steps" in merged:
+        hparams["gradient_accumulation_steps"] = int(merged["gradient_accumulation_steps"])
     return hparams
 
 
@@ -799,30 +818,39 @@ def _resolve_checkpoint_root() -> Path:
     return _cp_root()
 
 
-def _resolve_validation_strategy() -> dict:
-    """Return validation config from ``trainer.validation`` in config.yaml.
+def _resolve_validation_strategy(domain: str = "default") -> dict:
+    """Return validation config for *domain*.
+
+    Lookup order: trainer.domains.<domain>.validation overrides trainer.validation globals.
 
     Returns a dict with keys:
         strategy    — ``"rouge_l"`` (default) or ``"factual_accuracy"``
         probe_set   — probe YAML name (default ``"reasoning"``)
         min_accuracy — float threshold (default 0.6)
     """
-    vcfg = (_load_gristmill_config().get("trainer") or {}).get("validation", {})
+    cfg = _load_gristmill_config()
+    t = cfg.get("trainer") or {}
+    global_vcfg = t.get("validation") or {}
+    domain_vcfg = ((t.get("domains") or {}).get(domain) or {}).get("validation") or {}
+    # Domain-specific validation config overrides global
+    merged = {**global_vcfg, **domain_vcfg}
     return {
-        "strategy": vcfg.get("strategy", "rouge_l"),
-        "probe_set": vcfg.get("probe_set", "reasoning"),
-        "min_accuracy": float(vcfg.get("min_accuracy", 0.6)),
+        "strategy": merged.get("strategy", "rouge_l"),
+        "probe_set": merged.get("probe_set", "reasoning"),
+        "min_accuracy": float(merged.get("min_accuracy", 0.6)),
+        "use_context": bool(merged.get("use_context", False)),
     }
 
 
-def _build_validation_runner(base_model_name: str):
-    """Instantiate the correct validation runner based on config strategy."""
-    val_cfg = _resolve_validation_strategy()
+def _build_validation_runner(base_model_name: str, domain: str = "default"):
+    """Instantiate the correct validation runner for *domain* based on config strategy."""
+    val_cfg = _resolve_validation_strategy(domain=domain)
     strategy = val_cfg["strategy"]
 
     if strategy == "factual_accuracy":
         logger.info(
-            "Validation strategy: factual_accuracy (probe_set=%s, min_accuracy=%.2f)",
+            "Validation strategy [%s]: factual_accuracy (probe_set=%s, min_accuracy=%.2f)",
+            domain,
             val_cfg["probe_set"],
             val_cfg["min_accuracy"],
         )
@@ -830,9 +858,10 @@ def _build_validation_runner(base_model_name: str):
             base_model_name=base_model_name,
             probe_set=val_cfg["probe_set"],
             min_accuracy=val_cfg["min_accuracy"],
+            use_context=val_cfg["use_context"],
         )
 
-    logger.info("Validation strategy: rouge_l (legacy)")
+    logger.info("Validation strategy [%s]: rouge_l (legacy)", domain)
     return ValidationRunner(base_model_name=base_model_name)
 
 
