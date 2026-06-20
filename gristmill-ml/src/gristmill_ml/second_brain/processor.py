@@ -344,15 +344,15 @@ class SecondBrainProcessor:
     async def _fetch_second_brain_notes(self) -> list[SecondBrainNote]:
         """
         Retrieve recent second-brain notes from the warm tier via
-        ``GET /api/memory/recall?q=second_brain&limit=N``.
+        ``POST /api/memory/recall`` with a JSON body ``{"query": ..., "limit": ...}``.
 
         Returns hydrated SecondBrainNote objects.
         """
         url = f"{self.cfg.gristmill_base_url}/api/memory/recall"
-        params = {"q": "second_brain", "limit": str(self.cfg.recall_limit)}
+        body = {"query": "second_brain", "limit": self.cfg.recall_limit}
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
-                resp = await client.get(url, params=params)
+                resp = await client.post(url, json=body)
                 resp.raise_for_status()
                 raw: list[dict[str, Any]] = resp.json()
         except Exception:
