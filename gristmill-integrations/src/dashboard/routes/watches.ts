@@ -105,7 +105,28 @@ export async function watchesRoutes(
     Params: { id: string };
     Body: Partial<Omit<Watch, "id">>;
   }>("/:id", async (req, reply) => {
-    const updated = watchEngine.updateWatch(req.params.id, req.body);
+    const body = req.body;
+
+    if (body.name !== undefined && typeof body.name !== "string") {
+      return reply.status(400).send({ error: "'name' must be a string" });
+    }
+    if (body.topic !== undefined && typeof body.topic !== "string") {
+      return reply.status(400).send({ error: "'topic' must be a string" });
+    }
+    if (body.condition !== undefined && typeof body.condition !== "string") {
+      return reply.status(400).send({ error: "'condition' must be a string" });
+    }
+    if (body.channelIds !== undefined && !Array.isArray(body.channelIds)) {
+      return reply.status(400).send({ error: "'channelIds' must be a string[]" });
+    }
+    if (body.cooldownMs !== undefined && typeof body.cooldownMs !== "number") {
+      return reply.status(400).send({ error: "'cooldownMs' must be a number" });
+    }
+    if (body.enabled !== undefined && typeof body.enabled !== "boolean") {
+      return reply.status(400).send({ error: "'enabled' must be a boolean" });
+    }
+
+    const updated = watchEngine.updateWatch(req.params.id, body);
     if (!updated) {
       return reply.status(404).send({ error: `Watch "${req.params.id}" not found` });
     }
