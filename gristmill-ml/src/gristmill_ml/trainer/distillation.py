@@ -130,6 +130,7 @@ class DistillationEngine:
         import time
 
         start = time.time()
+        pending: list[dict] = []
 
         try:
             # ── Load training records ─────────────────────────────────────────
@@ -211,6 +212,11 @@ class DistillationEngine:
 
         except Exception as exc:
             logger.exception("DistillationEngine cycle failed")
+            if pending:
+                # Records may have been marked IN_TRAINING before the failure.
+                # Roll them back to PENDING so the next cycle retries them
+                # instead of leaving them stuck forever.
+                _mark_pending(training_db_path, [r["record_id"] for r in pending])
             return CycleResult(
                 version=version,
                 adapter_path=self.output_dir,
@@ -501,3 +507,25 @@ def _mark_consumed(db_path: Path, record_ids: list[str]) -> None:
         conn.close()
     except sqlite3.Error as exc:
         logger.error("Failed to mark CONSUMED: %s", exc)
+
+
+def _mark_pending(db_path: Path, record_ids: list[str]) -> None:
+    """Roll records back to PENDING (used to recover from a failed cycle).
+
+    Without this, a cycle that fails after ``_mark_in_training`` but before
+    ``_mark_consumed`` leaves its records permanently stuck in IN_TRAINING —
+    they are never selected by ``_load_pending_records`` again.
+    """
+    if not record_ids:
+        return
+    try:
+        conn = sqlite3.connect(str(db_path), check_same_thread=False)
+        placeholders = ",".join("?" * len(record_ids))
+        conn.execute(
+            f"UPDATE training_records SET status='PENDING' WHERE record_id IN ({placeholders})",
+            record_ids,
+        )
+        conn.commit()
+        conn.close()
+    except sqlite3.Error as exc:
+        logger.error("Failed to mark PENDING (rollback): %s", exc)
