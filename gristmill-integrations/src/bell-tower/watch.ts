@@ -110,7 +110,19 @@ export class WatchEngine {
       const last = this.lastFired.get(watch.id) ?? 0;
       if (now - last < watch.cooldownMs) continue;
 
-      if (this._evaluateCompound(watch.condition, payload)) {
+      // A single malformed watch (e.g. a non-string `condition` smuggled in
+      // via an unvalidated update, or a corrupted persisted file) must not
+      // throw out of evaluate() — that would kill the caller's entire bus
+      // subscription loop, silencing every other watch on the topic too.
+      let matched: boolean;
+      try {
+        matched = this._evaluateCompound(watch.condition, payload);
+      } catch (err) {
+        console.warn(`[WatchEngine] Watch "${watch.id}" failed to evaluate:`, err);
+        continue;
+      }
+
+      if (matched) {
         this.lastFired.set(watch.id, now);
         fired.push(watch);
       }

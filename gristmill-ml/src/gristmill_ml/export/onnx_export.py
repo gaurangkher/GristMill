@@ -217,7 +217,11 @@ class OnnxExporter:
                 "input_ids": {0: "batch", 1: "seq"},
                 "attention_mask": {0: "batch", 1: "seq"},
                 "token_type_ids": {0: "batch", 1: "seq"},
-                "logits": {0: "batch"},
+                # NER output is per-token: [batch, seq, num_labels]. Sequence
+                # length must be dynamic here too, matching export_embedder's
+                # last_hidden_state, or the exported graph bakes in the
+                # seq_len=128 dummy used for tracing.
+                "logits": {0: "batch", 1: "seq"},
             },
         )
 

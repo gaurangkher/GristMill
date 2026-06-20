@@ -294,11 +294,11 @@ impl Pipeline {
         }
 
         // Kahn's algorithm for topological sort + cycle detection.
-        let mut in_degree: HashMap<&str, usize> = HashMap::new();
         let mut dependents: HashMap<&str, Vec<&str>> = HashMap::new();
+        let mut in_degree: HashMap<&str, usize> =
+            self.steps.iter().map(|s| (s.id.as_str(), 0)).collect();
 
         for step in &self.steps {
-            in_degree.entry(step.id.as_str()).or_insert(0);
             for dep in &step.depends_on {
                 *in_degree.entry(step.id.as_str()).or_insert(0) += 1;
                 dependents
@@ -308,16 +308,7 @@ impl Pipeline {
             }
         }
 
-        // Note: in_degree is reset from scratch in Kahn's so we rebuild.
-        let mut in_degree2: HashMap<&str, usize> =
-            self.steps.iter().map(|s| (s.id.as_str(), 0)).collect();
-        for step in &self.steps {
-            for _dep in &step.depends_on {
-                *in_degree2.entry(step.id.as_str()).or_insert(0) += 1;
-            }
-        }
-
-        let mut queue: VecDeque<&str> = in_degree2
+        let mut queue: VecDeque<&str> = in_degree
             .iter()
             .filter(|(_, &deg)| deg == 0)
             .map(|(&id, _)| id)
@@ -329,7 +320,7 @@ impl Pipeline {
             order.push(node.to_owned());
             if let Some(next_steps) = dependents.get(node) {
                 for &next in next_steps {
-                    let deg = in_degree2.get_mut(next).unwrap();
+                    let deg = in_degree.get_mut(next).unwrap();
                     *deg -= 1;
                     if *deg == 0 {
                         queue.push_back(next);
@@ -340,7 +331,7 @@ impl Pipeline {
 
         if order.len() != self.steps.len() {
             // Find one node still in a cycle for a better error message.
-            let remaining: Vec<&str> = in_degree2
+            let remaining: Vec<&str> = in_degree
                 .iter()
                 .filter(|(_, &deg)| deg > 0)
                 .map(|(&id, _)| id)

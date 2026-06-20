@@ -118,6 +118,7 @@ def augment_record(
     The label and metadata are inherited from the original.
     """
     from .feedback import FeedbackRecord as FR  # local import to avoid circular
+    from .feedback import ROUTE_LABEL_MAP
 
     augmented: list[FR] = []
     text = getattr(record, "_text", "") or record.event_source
@@ -138,9 +139,7 @@ def augment_record(
         raw = {
             "event_id": f"{record.event_id}-aug{i}",
             "timestamp_ms": record.timestamp_ms + i,
-            "route_decision": list({0: "LOCAL_ML", 1: "RULES", 2: "HYBRID", 3: "LLM_NEEDED"})[
-                record.label
-            ],
+            "route_decision": list(ROUTE_LABEL_MAP.keys())[record.label],
             "confidence": record.confidence,
             "estimated_tokens": record.estimated_tokens,
             "actual_tokens": record.actual_tokens,

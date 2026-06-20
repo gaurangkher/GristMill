@@ -3,8 +3,12 @@
 /// All errors produced by the LLM escalation gateway.
 #[derive(Debug, thiserror::Error)]
 pub enum HammerError {
-    #[error("budget exceeded: daily used {daily_used}/{daily_limit} tokens")]
-    BudgetExceeded { daily_used: u64, daily_limit: u64 },
+    #[error("{period} budget exceeded: used {daily_used}/{daily_limit} tokens")]
+    BudgetExceeded {
+        period: &'static str,
+        daily_used: u64,
+        daily_limit: u64,
+    },
 
     #[error("all providers failed: {0}")]
     AllProvidersFailed(String),

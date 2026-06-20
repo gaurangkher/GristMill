@@ -332,6 +332,63 @@ mod tests {
     }
 
     #[test]
+    fn confidence_exactly_at_threshold_is_trusted_not_escalated() {
+        // The invariant (doc comment on CostOracle) is: confidence >= threshold
+        // is trusted as-is. evaluate() uses `confidence < self.threshold` to
+        // decide whether to escalate, so the boundary value itself (0.85)
+        // must NOT escalate.
+        let decision = oracle()
+            .evaluate(output(RouteLabel::LocalMl, 0.85), &event("boundary case"))
+            .unwrap();
+        assert!(matches!(decision, RouteDecision::LocalMl { .. }));
+    }
+
+    #[test]
+    fn confidence_just_below_threshold_escalates() {
+        let decision = oracle()
+            .evaluate(output(RouteLabel::LocalMl, 0.8499), &event("just under"))
+            .unwrap();
+        assert!(matches!(decision, RouteDecision::Hybrid { .. }));
+    }
+
+    #[test]
+    fn confidence_exactly_at_half_threshold_escalates_one_step_not_to_llm() {
+        // safe_escalation() jumps straight to LLM only when
+        // `confidence < threshold * 0.5`, so the boundary value (0.425)
+        // should take the one-step escalation path (LocalMl -> Hybrid),
+        // not the "very low confidence" LLM jump.
+        let half = 0.85_f32 * 0.5;
+        let decision = oracle()
+            .evaluate(output(RouteLabel::LocalMl, half), &event("half boundary"))
+            .unwrap();
+        assert!(matches!(decision, RouteDecision::Hybrid { .. }));
+    }
+
+    #[test]
+    fn moderate_uncertainty_rules_escalates_to_local_ml() {
+        let decision = oracle()
+            .evaluate(output(RouteLabel::Rules, 0.50), &event("ambiguous rule match"))
+            .unwrap();
+        assert!(matches!(decision, RouteDecision::LocalMl { .. }));
+    }
+
+    #[test]
+    fn moderate_uncertainty_hybrid_escalates_to_llm() {
+        let decision = oracle()
+            .evaluate(output(RouteLabel::Hybrid, 0.50), &event("ambiguous hybrid"))
+            .unwrap();
+        assert!(matches!(decision, RouteDecision::LlmNeeded { .. }));
+    }
+
+    #[test]
+    fn moderate_uncertainty_llm_needed_stays_llm_needed() {
+        let decision = oracle()
+            .evaluate(output(RouteLabel::LlmNeeded, 0.50), &event("ambiguous llm"))
+            .unwrap();
+        assert!(matches!(decision, RouteDecision::LlmNeeded { .. }));
+    }
+
+    #[test]
     fn token_estimate_for_llm_is_positive() {
         let ev = event("Tell me everything about quantum computing");
         let tokens = estimate_total_tokens(&ev, RouteLabel::LlmNeeded);

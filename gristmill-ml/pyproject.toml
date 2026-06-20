@@ -39,15 +39,20 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "pytest-cov>=4.0",
+    "pytest-asyncio>=0.24",
+    "pytest-mock>=3.14",
     "ruff>=0.4",
 ]
 
 [project.scripts]
-gristmill-train-sieve  = "gristmill_ml.training.sieve_trainer:main"
-gristmill-export       = "gristmill_ml.export.onnx_export:main"
-gristmill-validate     = "gristmill_ml.export.validate:main"
-gristmill-trainer      = "gristmill_ml.trainer.__main__:main"
-gristmill-second-brain = "gristmill_ml.second_brain.processor:main"
+gristmill-train-sieve   = "gristmill_ml.training.sieve_trainer:main"
+gristmill-export        = "gristmill_ml.export.onnx_export:main"
+gristmill-validate      = "gristmill_ml.export.validate:main"
+gristmill-trainer       = "gristmill_ml.trainer.__main__:main"
+gristmill-second-brain  = "gristmill_ml.second_brain.processor:main"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/gristmill_ml"]
