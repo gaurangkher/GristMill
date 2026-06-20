@@ -173,7 +173,18 @@ mod tests {
         let b = make_budget(100, 10_000);
         b.record_usage(90);
         let err = b.check(20).unwrap_err();
-        assert!(matches!(err, HammerError::BudgetExceeded { .. }));
+        match err {
+            HammerError::BudgetExceeded {
+                period,
+                daily_used,
+                daily_limit,
+            } => {
+                assert_eq!(period, "daily");
+                assert_eq!(daily_used, 90);
+                assert_eq!(daily_limit, 100);
+            }
+            other => panic!("expected BudgetExceeded, got {other:?}"),
+        }
     }
 
     #[test]
@@ -181,7 +192,20 @@ mod tests {
         let b = make_budget(10_000, 100);
         b.record_usage(90);
         let err = b.check(20).unwrap_err();
-        assert!(matches!(err, HammerError::BudgetExceeded { .. }));
+        match err {
+            HammerError::BudgetExceeded {
+                period,
+                daily_used,
+                daily_limit,
+            } => {
+                // Field names are generic (daily_used/daily_limit) but must
+                // carry the *monthly* values when the monthly cap is breached.
+                assert_eq!(period, "monthly");
+                assert_eq!(daily_used, 90);
+                assert_eq!(daily_limit, 100);
+            }
+            other => panic!("expected BudgetExceeded, got {other:?}"),
+        }
     }
 
     #[test]
