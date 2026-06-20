@@ -88,6 +88,7 @@ impl BudgetManager {
                 "daily budget exceeded",
             );
             return Err(HammerError::BudgetExceeded {
+                period: "daily",
                 daily_used: state.daily_used,
                 daily_limit: self.config.daily_tokens,
             });
@@ -99,6 +100,7 @@ impl BudgetManager {
                 "monthly budget exceeded",
             );
             return Err(HammerError::BudgetExceeded {
+                period: "monthly",
                 daily_used: state.monthly_used,
                 daily_limit: self.config.monthly_tokens,
             });
