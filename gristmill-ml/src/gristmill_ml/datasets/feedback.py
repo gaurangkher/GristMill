@@ -24,11 +24,14 @@ Stable schema (must not change without updating ``grist_sieve::feedback.rs``):
 from __future__ import annotations
 
 import json
+import logging
 import random
 from pathlib import Path
 from typing import Any, Optional
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 # ── Label / ordinal maps ──────────────────────────────────────────────────────
 
@@ -260,15 +263,30 @@ class FeedbackDataset:
                     try:
                         row: dict[str, Any] = json.loads(line)
                     except json.JSONDecodeError:
+                        logger.warning(
+                            "Skipping malformed JSON line in %s: %.80s", path, line
+                        )
                         continue
 
                     eid = row.get("event_id", "")
+                    if not eid:
+                        # Without a stable key, the row would collide with any
+                        # other record missing event_id under the same "" key
+                        # in raw_records, silently overwriting prior records.
+                        logger.warning("Skipping feedback row with no event_id in %s", path)
+                        continue
                     decision = row.get("route_decision", "")
 
                     if decision == "CORRECTION":
                         corrections[eid] = row.get("corrected_decision", "LOCAL_ML")
                     elif decision in ROUTE_LABEL_MAP:
                         raw_records[eid] = row
+                    else:
+                        logger.warning(
+                            "Skipping feedback row with unrecognized route_decision %r in %s",
+                            decision,
+                            path,
+                        )
 
         # Apply corrections
         for eid, corrected in corrections.items():
